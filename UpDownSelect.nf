@@ -13,6 +13,10 @@ process downloadGenomes {
     file "$y" into zip_ch
 
     """
-    datasets download genome taxon "$x" --assembly-level complete --exclude-atypical --released-after 12/01/2022 --filename "$y"
+    datasets download genome taxon "$x" \
+    --assembly-level complete \
+    --exclude-atypical \
+    --released-after 12/01/2022 \
+    --filename "$y"
     """
 }
