@@ -30,9 +30,29 @@ done
 fi
 
 mkdir data/prokka/
-#SAMPLE=$(find "data/genomes" -name "*.fna" | shuf -n 12)
-SAMPLE=$(find "data/genomes" -name "*.fna")
-parallel -j 12 prokka --prefix {/.} --outdir data/prokka/{/.} {} ::: "${SAMPLE[@]}"
+SAMPLE=$(find "data/genomes" -name "*.fna" | shuf -n 12)
+# SAMPLE=$(find "data/genomes" -name "*.fna")
+parallel -j 1 prokka --cpus 0 --prefix {/.} --locustag {/.} --outdir data/prokka/{/.} {} ::: "${SAMPLE[@]}"
 
-GFF=$(find "data/prokka/" -name "*.gff")
-roary -f data/roary/ -e --mafft -p 12 -v $GFF
+GFF_SAMPLE=$(find "data/prokka" -name "*.gff")
+# GFF_SAMPLE=$(find "data/prokka" -name "*.gff" | shuf -n 12)
+roary -f data/roary/ -e --mafft -p 12 -v $GFF_SAMPLE
+
+# Get relevant column from roary presence absence matrix
+# Some values in the column "Annotation" might contain ","
+# Reversing the table to circumvent this problem
+input_file="data/roary/gene_presence_absence.csv"
+cut -d "," -f1 "$input_file" > genes.txt
+output_file="data/roary/shortened_gene_presence_absence.csv"
+
+while read -r line; do
+  rev_line=$(echo "$line" | rev | cut -d "," -f-12 | rev)
+  echo "$rev_line" >> "$output_file.tmp"
+done < "$input_file"
+
+paste -d "," genes.txt "$output_file.tmp" > "$output_file"
+rm "$output_file.tmp"
+rm genes.txt
+
+CDS=$(find "data/prokka/" -name "*.ffn")
+parallel -j 12 "seqkit split -i --by-id-prefix '' --out-dir data/seqkit/{/.} {}" ::: "${CDS[@]}"
