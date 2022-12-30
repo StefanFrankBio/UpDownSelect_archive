@@ -1,2 +1,3 @@
-.nextflow*
-work/
+ncbi_dataset
+ncbi_dataset.zip
+data/

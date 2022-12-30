@@ -1,0 +1,10 @@
+name: UpDownSelect
+
+channels:
+  - conda-forge
+  - bioconda
+
+dependencies:
+  - prokka=1.14.6
+  - roary=3.13.0
+  - unzip=6.0
