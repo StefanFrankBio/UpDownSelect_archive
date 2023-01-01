@@ -3,6 +3,7 @@ name: UpDownSelect
 channels:
   - conda-forge
   - bioconda
+  - anaconda
 
 dependencies:
   - prokka=1.14.6
@@ -10,3 +11,6 @@ dependencies:
   - unzip=6.0
   - seqkit=2.3.1
   - mafft=7.508
+  - zip
+  - gawk
+  - dos2unix
