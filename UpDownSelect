@@ -55,7 +55,6 @@ paste -d "," $GENES "$PAN_TABLE_TEMP" > "$PAN_TABLE_FILTERED"
 sed -i '1d' "$PAN_TABLE_FILTERED"
 sed -i 's/,/\t/g' "$PAN_TABLE_FILTERED"
 sed -i 's/"//g' "$PAN_TABLE_FILTERED"
-rm -r data/temp
 
 mkdir data/per_gene
 while IFS= read -r line; do
