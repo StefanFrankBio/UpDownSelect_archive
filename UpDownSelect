@@ -1,0 +1,94 @@
+#!/bin/bash
+
+INPUT_DIR=$1
+THREADS=$2
+SAMPLE_SIZE=$3
+
+mkdir -p data/genomes/
+GENOMES=$(find $INPUT_DIR -name "*.fna")
+for file in $GENOMES; do
+    base=$(basename $file | cut -d "_" -f -2)
+    awk -i inplace '{gsub(/^>.*$/, ">" "'"$base"'" "_" (++c)); print}' $file
+    cp $file data/genomes/$base.fna; done
+
+mkdir data/prokka/
+FNA=$(find "data/genomes" -name "*.fna" | shuf -n 12)
+parallel -j $THREADS \
+    prokka \
+        --cpus 1 \
+        --prefix {/.} \
+        --locustag {/.} \
+        --outdir data/prokka/{/.} {} \
+    ::: "${FNA[@]}"
+
+FFN=$(find "data/prokka/" -name "*.ffn")
+parallel -j $THREADS \
+    " seqkit split \
+        -i \
+        --by-id-prefix '' \
+        --out-dir data/seqkit/{/.} {}" \
+    ::: "${FFN[@]}"
+
+GFF=$(find "data/prokka" -name "*.gff" | shuf -n 12)
+roary \
+    -f data/roary \
+    -e \
+    --mafft \
+    -p $THREADS \
+    $GFF 
+
+PAN_TABLE="data/roary/gene_presence_absence.csv"
+GENES="data/temp/genes.temp"
+dos2unix $PAN_TABLE
+mkdir data/temp
+cut -d "," -f1 "$PAN_TABLE" > $GENES
+sed -i 's/[\t/'\''() ]/_/g' $GENES
+
+PAN_TABLE_TEMP="data/temp/gene_presence_absence.temp"
+while read -r line; do
+  rev_line=$(echo "$line" | rev | cut -d "," -f-$SAMPLE_SIZE | rev)
+  echo "$rev_line" >> "$PAN_TABLE_TEMP"
+done < "$PAN_TABLE"
+
+PAN_TABLE_FILTERED="data/roary/gene_presence_absence_filtered.tsv"
+paste -d "," $GENES "$PAN_TABLE_TEMP" > "$PAN_TABLE_FILTERED"
+sed -i '1d' "$PAN_TABLE_FILTERED"
+sed -i 's/,/\t/g' "$PAN_TABLE_FILTERED"
+sed -i 's/"//g' "$PAN_TABLE_FILTERED"
+rm -r data/temp
+
+mkdir data/per_gene
+while IFS= read -r line; do
+    dir=$(awk '{print $1}' <<< "$line")
+    loci=$(awk '{$1=""; print $0}' <<< "$line")
+    if [[ $(echo $loci | wc -w) -ge $SAMPLE_SIZE ]]; then
+        mkdir data/per_gene/$dir
+        for locus in $loci; do
+            base=$(echo $locus | cut -d "_" -f -2)
+            cp data/seqkit/$base/$locus.ffn data/per_gene/$dir/
+            done
+    fi
+done < $PAN_TABLE_FILTERED
+
+PER_GENE=data/temp/PER_GENE.temp
+find data/per_gene/* -type d > $PER_GENE
+mkdir data/multi
+for dir in $(cat $PER_GENE); do
+    cat $dir/*.ffn > data/multi/$(basename $dir).fasta
+    done
+
+MULTI=data/temp/MULTI.temp
+find data/multi -type f > $MULTI
+mkdir data/msa
+parallel -j $THREADS \
+    "mafft \
+        --auto \
+        --preservecase \
+        {} \
+        > data/msa/{/.}.msa" \
+    :::: $MULTI
+
+MSA=data/temp/MSA.temp
+find data/msa -type f > $MSA
+mkdir data/consensus
+parallel -j $THREADS "cons -name {/.}.consensus {} data/consensus/{/.}.cons" :::: $MSA
