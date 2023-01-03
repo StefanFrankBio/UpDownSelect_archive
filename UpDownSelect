@@ -90,4 +90,6 @@ parallel -j $THREADS \
 MSA=data/temp/MSA.temp
 find data/msa -type f > $MSA
 mkdir data/consensus
-parallel -j $THREADS "cons -name {/.}.consensus {} data/consensus/{/.}.cons" :::: $MSA
+parallel -j $THREADS \
+    "cons -name {/.}.consensus {} data/consensus/{/.}.cons" \
+    :::: $MSA
