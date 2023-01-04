@@ -97,7 +97,7 @@ SAMPLE_SIZE=$3
 CONSENSUS=data/temp/CONSENSUS.temp
 find data/consensus -type f > $CONSENSUS
 mkdir data/dNdS
-parallel -j 1 \
+parallel -j $THREADS \
     "python scripts/dNdS.py \
         --reference {} \
         --variant data/msa/{/.}.msa \

@@ -16,3 +16,4 @@ dependencies:
   - dos2unix
   - emboss=6.6.0
   - biopython
+  - pandas

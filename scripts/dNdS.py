@@ -51,7 +51,7 @@ def main():
             ns_ratios += [tsub == trans_codon for tsub in trans_subs]
 
     variants = read_fasta(args.variant, multi=True)
-    with open(args.output, 'w') as outfile:
+    with open(f"{args.output}.dnds", 'w') as outfile:
         print(*['ID', 'dN/dS', 'dN', 'dS', 'status'], file=outfile, sep='\t')
         for variant in variants:
             var_seq = str(variant.seq)
