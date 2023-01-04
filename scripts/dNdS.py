@@ -39,10 +39,7 @@ def build_trans_table():
 def main():
     args = parse_args()
     reference = read_fasta(args.reference)
-    # ref_seq = str(reference.seq).upper()
-    ref_seq = str(reference.seq)
-    internal_gaps_ref = ref_seq.strip('n').count('n')
-    ref_seq = ref_seq.upper()
+    ref_seq = str(reference.seq).upper()
     ref_codons = findall('...', ref_seq)
     trans_table = build_trans_table()
     ns_ratios = []
@@ -62,9 +59,9 @@ def main():
             if ref_seq == var_seq:
                 print(*[variant.id, -1, 0, 0, 'identical'], file=outfile, sep='\t')
             # elif internal_gaps % 3 != 0:
-            elif internal_gaps_ref - internal_gaps_var != 0:
-                print(*[variant.id, -1, 0, 0, 'frame_shifted'], file=outfile, sep='\t')
-                print(reference.id, variant.id, 'frame shifted!')
+            # elif internal_gaps_ref - internal_gaps_var != 0:
+            #     print(*[variant.id, -1, 0, 0, 'frame_shifted'], file=outfile, sep='\t')
+            #     print(reference.id, variant.id, 'frame shifted!')
             else:
                 test = [(i, v) for i, (r, v) in enumerate(zip(ref_seq, var_seq)) if r != v and v != '-']
                 test2 = []
