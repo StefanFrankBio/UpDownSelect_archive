@@ -87,19 +87,43 @@ SAMPLE_SIZE=$3
 #         > data/msa/{/.}.msa" \
 #     :::: $MULTI
 
-# MSA=data/temp/MSA.temp
 # find data/msa -type f > $MSA
 # mkdir data/consensus
 # parallel -j $THREADS \
 #     "cons -name {/.}.consensus {} data/consensus/{/.}.cons" \
 #     :::: $MSA
 
-CONSENSUS=data/temp/CONSENSUS.temp
-find data/consensus -type f > $CONSENSUS
-mkdir data/dNdS
+# mkdir data/rapidnj
+# parallel -j $THREADS \
+#     "rapidnj {} \
+#     -i fa \
+#     -x data/rapidnj/{/.}.tree" \
+#     :::: $MSA
+
+# mkdir data/stopless_msa
+# parallel -j $THREADS \
+#     "python scripts/remove_stop_codons.py \
+#     -i {} \
+#     -o data/stopless_msa/{/.}.msa" \
+#     :::: $MSA
+
+STOPLESS=data/temp/STOPLESS.temp
+find data/stopless_msa -type f > $STOPLESS
+mkdir data/meme
 parallel -j $THREADS \
-    "python scripts/dNdS.py \
-        --reference {} \
-        --variant data/msa/{/.}.msa \
-        --output data/dNdS/{/.}" \
-    :::: $CONSENSUS
+    "hyphy meme \
+    --alignment {} \
+    --tree data/rapidnj/{/.}.tree \
+    --output data/meme/{/.}.meme" \
+    :::: $STOPLESS
+
+# CONSENSUS=data/temp/CONSENSUS.temp
+# find data/consensus -type f > $CONSENSUS
+# mkdir data/dNdS
+# parallel -j $THREADS \
+#     "python scripts/dNdS.py \
+#         --reference {} \
+#         --variant data/msa/{/.}.msa \
+#         --output data/dNdS/{/.}" \
+#     :::: $CONSENSUS
+

@@ -49,7 +49,7 @@ def main():
             trans_codon = trans_table[codon]
             trans_subs = [trans_table[sub] for sub in substitutions]
             ns_ratios += [tsub == trans_codon for tsub in trans_subs]
-
+    print(ns_ratios)
     variants = read_fasta(args.variant, multi=True)
     with open(f"{args.output}.dnds", 'w') as outfile:
         print(*['ID', 'dN/dS', 'dN', 'dS', 'status'], file=outfile, sep='\t')
@@ -72,6 +72,7 @@ def main():
                         test2.append(trans_table[ref_codon] == trans_table[var_codon])
                 ns_ratio = statistics.mean(ns_ratios)
                 dN = (len(test2)-sum(test2))/(1-ns_ratio)
+                print(ns_ratio)
                 dS = sum(test2)/ns_ratio
                 if dS:
                     dNdS = dN/dS
