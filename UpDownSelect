@@ -70,6 +70,12 @@ SAMPLE_SIZE=$3
 # done < $PAN_TABLE_FILTERED
 
 # PER_GENE=data/temp/PER_GENE.temp
+# find data/per_gene/ -type f > $PER_GENE
+# parallel -j $THREADS \
+#     "sed -i '1s/.*/>{/.}/' {}" \
+#     :::: $PER_GENE
+
+# PER_GENE=data/temp/PER_GENE.temp
 # find data/per_gene/* -type d > $PER_GENE
 # mkdir data/multi
 # for dir in $(cat $PER_GENE); do
@@ -87,6 +93,7 @@ SAMPLE_SIZE=$3
 #         > data/msa/{/.}.msa" \
 #     :::: $MULTI
 
+# MSA=data/temp/MSA.temp
 # find data/msa -type f > $MSA
 # mkdir data/consensus
 # parallel -j $THREADS \
@@ -97,7 +104,8 @@ SAMPLE_SIZE=$3
 # parallel -j $THREADS \
 #     "rapidnj {} \
 #     -i fa \
-#     -x data/rapidnj/{/.}.tree" \
+#     -x data/rapidnj/{/.}.tree \
+#     && sed -i 's/'\''//g' data/rapidnj/{/.}.tree" \
 #     :::: $MSA
 
 # mkdir data/stopless_msa
@@ -107,15 +115,31 @@ SAMPLE_SIZE=$3
 #     -o data/stopless_msa/{/.}.msa" \
 #     :::: $MSA
 
-STOPLESS=data/temp/STOPLESS.temp
-find data/stopless_msa -type f > $STOPLESS
-mkdir data/meme
-parallel -j $THREADS \
-    "hyphy meme \
-    --alignment {} \
-    --tree data/rapidnj/{/.}.tree \
-    --output data/meme/{/.}.meme" \
-    :::: $STOPLESS
+# STOPLESS=data/temp/STOPLESS.temp
+# find data/stopless_msa -type f > $STOPLESS
+# mkdir data/meme
+# parallel -j $THREADS \
+#     "hyphy meme \
+#     --alignment {} \
+#     --tree data/rapidnj/{/.}.tree \
+#     --output data/meme/{/.}.meme" \
+#     :::: $STOPLESS
+
+# mkdir data/fel
+# parallel -j $THREADS \
+#     "hyphy fel \
+#     --alignment {} \
+#     --tree data/rapidnj/{/.}.tree \
+#     --output data/fel/{/.}.fel" \
+#     :::: $STOPLESS
+
+# mkdir data/slac
+# parallel -j $THREADS \
+#     "hyphy slac \
+#     --alignment {} \
+#     --tree data/rapidnj/{/.}.tree \
+#     --output data/slac/{/.}.slac" \
+#     :::: $STOPLESS
 
 # CONSENSUS=data/temp/CONSENSUS.temp
 # find data/consensus -type f > $CONSENSUS
