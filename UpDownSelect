@@ -4,6 +4,17 @@ INPUT_DIR=$1
 THREADS=$2
 SAMPLE_SIZE=$3
 
+# datasets download genome taxon "staphylococcus aureus" \
+#     --assembly-level complete \
+#     --exclude-atypical \
+#     --reference \
+#     --filename "${INPUT_DIR}.zip"
+
+# unzip -n "${INPUT_DIR}.zip"
+# if [ "$INPUT_DIR" != "ncbi_dataset" ]; then
+#     mv ncbi_dataset $INPUT_DIR
+# fi
+
 # mkdir -p data/genomes/
 # GENOMES=$(find $INPUT_DIR -name "*.fna")
 # for file in $GENOMES; do
@@ -23,7 +34,7 @@ SAMPLE_SIZE=$3
 
 # FFN=$(find "data/prokka/" -name "*.ffn")
 # parallel -j $THREADS \
-#     " seqkit split \
+#     "seqkit split \
 #         -i \
 #         --by-id-prefix '' \
 #         --out-dir data/seqkit/{/.} {}" \
@@ -163,4 +174,3 @@ SAMPLE_SIZE=$3
 #         --variant data/msa/{/.}.msa \
 #         --output data/dNdS/{/.}" \
 #     :::: $CONSENSUS
-

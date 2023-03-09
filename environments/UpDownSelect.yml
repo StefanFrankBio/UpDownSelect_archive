@@ -3,7 +3,7 @@ name: UpDownSelect
 channels:
   - conda-forge
   - bioconda
-  - anaconda
+  - defaults
 
 dependencies:
   - prokka=1.14.6
@@ -17,3 +17,4 @@ dependencies:
   - emboss=6.6.0
   - biopython
   - pandas
+  - ncbi-datasets-cli=14.15.0
