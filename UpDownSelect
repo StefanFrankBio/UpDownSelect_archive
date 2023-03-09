@@ -141,6 +141,19 @@ SAMPLE_SIZE=$3
 #     --output data/slac/{/.}.slac" \
 #     :::: $STOPLESS
 
+# mkdir data/codeml_ctl
+# parallel -j $THREADS \
+#     "sed 's|stewart\.aa|{}|g; \
+#     s|mlc|data/codeml/{/.}.cml|g; \
+#     s|stewart\.trees|data/rapidnj/{/.}.tree|g' \
+#     config/codeml_default.ctl > data/codeml_ctl/{/.}.ctl" \
+#     :::: $STOPLESS
+
+# CTL=data/temp/CTL.temp
+# find data/codeml_ctl -type f > $CTL
+# mkdir data/codeml
+# parallel -j $THREADS "codeml {}" :::: $CTL
+
 # CONSENSUS=data/temp/CONSENSUS.temp
 # find data/consensus -type f > $CONSENSUS
 # mkdir data/dNdS
