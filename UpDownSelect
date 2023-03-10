@@ -2,12 +2,10 @@
 
 INPUT_DIR=$1
 THREADS=$2
-SAMPLE_SIZE=$3
 
 # datasets download genome taxon "staphylococcus aureus" \
 #     --assembly-level complete \
 #     --exclude-atypical \
-#     --reference \
 #     --filename "${INPUT_DIR}.zip"
 
 # unzip -n "${INPUT_DIR}.zip"
@@ -23,7 +21,7 @@ SAMPLE_SIZE=$3
 #     cp $file data/genomes/$base.fna; done
 
 # mkdir data/prokka/
-# FNA=$(find "data/genomes" -name "*.fna" | shuf -n 12)
+# FNA=$(find "data/genomes" -name "*.fna")
 # parallel -j $THREADS \
 #     prokka \
 #         --cpus 1 \
@@ -40,7 +38,7 @@ SAMPLE_SIZE=$3
 #         --out-dir data/seqkit/{/.} {}" \
 #     ::: "${FFN[@]}"
 
-# GFF=$(find "data/prokka" -name "*.gff" | shuf -n 12)
+# GFF=$(find "data/prokka" -name "*.gff")
 # roary \
 #     -f data/roary \
 #     -e \
@@ -67,11 +65,12 @@ SAMPLE_SIZE=$3
 # sed -i 's/,/\t/g' "$PAN_TABLE_FILTERED"
 # sed -i 's/"//g' "$PAN_TABLE_FILTERED"
 
+# GGF_COUNT=$(echo "$GFF" | wc -l)
 # mkdir data/per_gene
 # while IFS= read -r line; do
 #     dir=$(awk '{print $1}' <<< "$line")
 #     loci=$(awk '{$1=""; print $0}' <<< "$line")
-#     if [[ $(echo $loci | wc -w) -ge $SAMPLE_SIZE ]]; then
+#     if [[ $(echo $loci | wc -w) -ge $GFF_COUNT ]]; then
 #         mkdir data/per_gene/$dir
 #         for locus in $loci; do
 #             base=$(echo $locus | cut -d "_" -f -2)
@@ -85,6 +84,9 @@ SAMPLE_SIZE=$3
 # parallel -j $THREADS \
 #     "sed -i '1s/.*/>{/.}/' {}" \
 #     :::: $PER_GENE
+# parallel -j $THREADS \
+#     "truncate -s -4 {}" \
+#     :::: $PER_GENE
 
 # PER_GENE=data/temp/PER_GENE.temp
 # find data/per_gene/* -type d > $PER_GENE
@@ -95,6 +97,17 @@ SAMPLE_SIZE=$3
 
 # MULTI=data/temp/MULTI.temp
 # find data/multi -type f > $MULTI
+# mkdir data/rmdup
+# mkdir data/duplicates
+# parallel -j $THREADS \
+#     "seqkit rmdup \
+#         -s {} \
+#         -D data/duplicates/{/.}.dup \
+#         > data/rmdup/{/.}.fasta" \
+#     :::: $MULTI
+
+# RMDUP=data/temp/RMDUP.temp
+# find data/rmdup -type f > $RMDUP
 # mkdir data/msa
 # parallel -j $THREADS \
 #     "mafft \
@@ -102,7 +115,7 @@ SAMPLE_SIZE=$3
 #         --preservecase \
 #         {} \
 #         > data/msa/{/.}.msa" \
-#     :::: $MULTI
+#     :::: $RMDUP
 
 # MSA=data/temp/MSA.temp
 # find data/msa -type f > $MSA
@@ -136,6 +149,16 @@ SAMPLE_SIZE=$3
 #     --output data/meme/{/.}.meme" \
 #     :::: $STOPLESS
 
+# MEME=data/temp/MEME.temp
+# find data/meme -type f > $MEME
+# mkdir data/meme_reports
+# parallel -j $THREADS \
+#     "python scripts/hyphy_report.py \
+#     -f {} \
+#     -o data/meme_reports/{/.}.tsv \
+#     -m meme" \
+#     :::: $MEME
+
 # mkdir data/fel
 # parallel -j $THREADS \
 #     "hyphy fel \
@@ -144,13 +167,34 @@ SAMPLE_SIZE=$3
 #     --output data/fel/{/.}.fel" \
 #     :::: $STOPLESS
 
+# FEL=data/temp/FEL.temp
+# find data/fel -type f > $FEL
+# mkdir data/fel_reports
+# parallel -j $THREADS \
+#     "python scripts/hyphy_report.py \
+#     -f {} \
+#     -o data/fel_reports/{/.}.tsv \
+#     -m fel" \
+#     :::: $FEL
+
 # mkdir data/slac
 # parallel -j $THREADS \
 #     "hyphy slac \
 #     --alignment {} \
 #     --tree data/rapidnj/{/.}.tree \
 #     --output data/slac/{/.}.slac" \
-#     :::: $STOPLESS
+#     :::: $STOPLESS > slac.log 2>&1
+
+# SLAC=data/temp/SLAC.temp
+# find data/slac -type f > $SLAC
+# mkdir data/slac_reports
+# parallel -j $THREADS \
+#     "echo {} && \
+#     python scripts/hyphy_report.py \
+#     -f {} \
+#     -o data/slac_reports/{/.}.tsv \
+#     -m slac" \
+#     :::: $SLAC
 
 # mkdir data/codeml_ctl
 # parallel -j $THREADS \
