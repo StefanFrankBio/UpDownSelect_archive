@@ -18,3 +18,7 @@ dependencies:
   - biopython
   - pandas
   - ncbi-datasets-cli=14.15.0
+  - hyphy=2.5.48
+  - paml=4.10.6
+  - coreutils=9.1
+  - rapidnj=2.3.2
