@@ -13,192 +13,217 @@ THREADS=$2
 #     mv ncbi_dataset $INPUT_DIR
 # fi
 
-mkdir -p data/genomes/
-GENOMES=$(find $INPUT_DIR -name "*.fna")
-for file in $GENOMES; do
-    base=$(basename $file | cut -d "_" -f -2)
-    awk -i inplace '{gsub(/^>.*$/, ">" "'"$base"'" "_" (++c)); print}' $file
-    cp $file data/genomes/$base.fna; done
+# mkdir -p data/genomes/
+# GENOMES=$(find $INPUT_DIR -name "*.fna")
+# for file in $GENOMES; do
+#     base=$(basename $file | cut -d "_" -f -2)
+#     awk -i inplace '{gsub(/^>.*$/, ">" "'"$base"'" "_" (++c)); print}' $file
+#     cp $file data/genomes/$base.fna; done
 
-mkdir data/prokka/
-FNA=$(find "data/genomes" -name "*.fna")
-parallel -j $THREADS \
-    prokka \
-        --cpus 1 \
-        --prefix {/.} \
-        --locustag {/.} \
-        --outdir data/prokka/{/.} {} \
-    ::: "${FNA[@]}"
+# mkdir data/prokka/
+# FNA=$(find "data/genomes" -name "*.fna")
+# parallel -j $THREADS \
+#     prokka \
+#         --cpus 1 \
+#         --prefix {/.} \
+#         --locustag {/.} \
+#         --outdir data/prokka/{/.} {} \
+#     ::: "${FNA[@]}"
 
-FFN=$(find "data/prokka/" -name "*.ffn")
-parallel -j $THREADS \
-    "seqkit split \
-        -i \
-        --by-id-prefix '' \
-        --out-dir data/seqkit/{/.} {}" \
-    ::: "${FFN[@]}"
+# FFN=$(find "data/prokka/" -name "*.ffn")
+# parallel -j $THREADS \
+#     "seqkit split \
+#         -i \
+#         --by-id-prefix '' \
+#         --out-dir data/seqkit/{/.} {}" \
+#     ::: "${FFN[@]}"
 
-GFF=$(find "data/prokka" -name "*.gff")
-roary \
-    -f data/roary \
-    -e \
-    --mafft \
-    -p $THREADS \
-    $GFF 
+# GFF=$(find "data/prokka" -name "*.gff")
+# roary \
+#     -f data/roary \
+#     -e \
+#     --mafft \
+#     -p $THREADS \
+#     $GFF 
 
-PAN_TABLE="data/roary/gene_presence_absence.csv"
-GENES="data/temp/genes.temp"
-dos2unix $PAN_TABLE
-mkdir data/temp
-cut -d "," -f1 "$PAN_TABLE" > $GENES
-sed -i 's/[\t/'\''() ]/_/g' $GENES
+# PAN_TABLE="data/roary/gene_presence_absence.csv"
+# GENES="data/temp/genes.temp"
+# dos2unix $PAN_TABLE
+# mkdir data/temp
+# cut -d "," -f1 "$PAN_TABLE" > $GENES
+# sed -i 's/[\t/'\''() ]/_/g' $GENES
 
-PAN_TABLE_TEMP="data/temp/gene_presence_absence.temp"
-GFF_COUNT=$(echo "$GFF" | wc -l)
-while read -r line; do
-  rev_line=$(echo "$line" | rev | cut -d "," -f-$GFF_COUNT | rev)
-  echo "$rev_line" >> "$PAN_TABLE_TEMP"
-done < "$PAN_TABLE"
+# PAN_TABLE_TEMP="data/temp/gene_presence_absence.temp"
+# GFF_COUNT=$(echo "$GFF" | wc -l)
+# while read -r line; do
+#   rev_line=$(echo "$line" | rev | cut -d "," -f-$GFF_COUNT | rev)
+#   echo "$rev_line" >> "$PAN_TABLE_TEMP"
+# done < "$PAN_TABLE"
 
-PAN_TABLE_FILTERED="data/roary/gene_presence_absence_filtered.tsv"
-paste -d "," $GENES "$PAN_TABLE_TEMP" > "$PAN_TABLE_FILTERED"
-sed -i '1d' "$PAN_TABLE_FILTERED"
-sed -i 's/,/\t/g' "$PAN_TABLE_FILTERED"
-sed -i 's/"//g' "$PAN_TABLE_FILTERED"
+# PAN_TABLE_FILTERED="data/roary/gene_presence_absence_filtered.tsv"
+# paste -d "," $GENES "$PAN_TABLE_TEMP" > "$PAN_TABLE_FILTERED"
+# sed -i '1d' "$PAN_TABLE_FILTERED"
+# sed -i 's/,/\t/g' "$PAN_TABLE_FILTERED"
+# sed -i 's/"//g' "$PAN_TABLE_FILTERED"
 
-mkdir data/per_gene
-while IFS= read -r line; do
-    dir=$(awk '{print $1}' <<< "$line")
-    loci=$(awk '{$1=""; print $0}' <<< "$line")
-    if [[ $(echo $loci | wc -w) -ge $GFF_COUNT ]]; then
-        mkdir data/per_gene/$dir
-        for locus in $loci; do
-            base=$(echo $locus | cut -d "_" -f -2)
-            cp data/seqkit/$base/$locus.ffn data/per_gene/$dir/
-            done
-    fi
-done < $PAN_TABLE_FILTERED
+# mkdir data/per_gene
+# while IFS= read -r line; do
+#     dir=$(awk '{print $1}' <<< "$line")
+#     loci=$(awk '{$1=""; print $0}' <<< "$line")
+#     if [[ $(echo $loci | wc -w) -ge $GFF_COUNT ]]; then
+#         mkdir data/per_gene/$dir
+#         for locus in $loci; do
+#             base=$(echo $locus | cut -d "_" -f -2)
+#             cp data/seqkit/$base/$locus.ffn data/per_gene/$dir/
+#             done
+#     fi
+# done < $PAN_TABLE_FILTERED
 
-PER_GENE=data/temp/PER_GENE.temp
-find data/per_gene/ -type f > $PER_GENE
-parallel -j $THREADS \
-    "sed -i '1s/.*/>{/.}/' {}; \
-    truncate -s -4 {}; \
-    echo >> {}" \
-    :::: $PER_GENE
+# PER_GENE=data/temp/PER_GENE.temp
+# find data/per_gene/ -type f > $PER_GENE
+# parallel -j $THREADS \
+#     "sed -i '1s/.*/>{/.}/' {}; \
+#     truncate -s -4 {}; \
+#     echo >> {}" \
+#     :::: $PER_GENE
 
-PER_GENE=data/temp/PER_GENE.temp
-find data/per_gene/* -type d > $PER_GENE
-mkdir data/multi
-for dir in $(cat $PER_GENE); do
-    cat $dir/*.ffn > data/multi/$(basename $dir).fasta
-    done
+# PER_GENE=data/temp/PER_GENE.temp
+# find data/per_gene/* -type d > $PER_GENE
+# mkdir data/multi
+# for dir in $(cat $PER_GENE); do
+#     cat $dir/*.ffn > data/multi/$(basename $dir).fasta
+#     done
 
-MULTI=data/temp/MULTI.temp
-find data/multi -type f > $MULTI
-mkdir data/rmdup
-mkdir data/duplicates
-parallel -j $THREADS \
-    "seqkit rmdup \
-        -s {} \
-        -D data/duplicates/{/.}.dup \
-        > data/rmdup/{/.}.fasta" \
-    :::: $MULTI
+# MULTI=data/temp/MULTI.temp
+# find data/multi -type f > $MULTI
+# mkdir data/rmdup
+# mkdir data/duplicates
+# parallel -j $THREADS \
+#     "seqkit rmdup \
+#         -s {} \
+#         -D data/duplicates/{/.}.dup \
+#         > data/rmdup/{/.}.fasta" \
+#     :::: $MULTI
 
-RMDUP=data/temp/RMDUP.temp
-find data/rmdup -type f > $RMDUP
-mkdir data/msa
-parallel -j $THREADS \
-    "mafft \
-        --auto \
-        --preservecase \
-        {} \
-        > data/msa/{/.}.msa" \
-    :::: $RMDUP
+# RMDUP=data/temp/RMDUP.temp
+# find data/rmdup -type f > $RMDUP
+# mkdir data/msa
+# parallel -j $THREADS \
+#     "mafft \
+#         --auto \
+#         --preservecase \
+#         {} \
+#         > data/msa/{/.}.msa" \
+#     :::: $RMDUP
 
-MSA=data/temp/MSA.temp
-find data/msa -type f > $MSA
-mkdir data/rapidnj
-parallel -j $THREADS \
-    "rapidnj {} \
-    -i fa \
-    -x data/rapidnj/{/.}.tree \
-    && sed -i 's/'\''//g' data/rapidnj/{/.}.tree" \
-    :::: $MSA
+# MSA=data/temp/MSA.temp
+# find data/msa -type f > $MSA
+# mkdir data/rapidnj
+# parallel -j $THREADS \
+#     "rapidnj {} \
+#     -i fa \
+#     -x data/rapidnj/{/.}.tree \
+#     && sed -i 's/'\''//g' data/rapidnj/{/.}.tree" \
+#     :::: $MSA
 
-mkdir data/meme
-parallel -j $THREADS \
-    'if [ -s "data/rapidnj/{/.}.tree" ]; then \
-        hyphy meme \
-            --alignment {} \
-            --tree data/rapidnj/{/.}.tree \
-            --output data/meme/{/.}.meme; \
-    fi' \
-    :::: $MSA
+# mkdir data/meme
+# parallel -j $THREADS \
+#     'if [ -s "data/rapidnj/{/.}.tree" ]; then \
+#         hyphy meme \
+#             --alignment {} \
+#             --tree data/rapidnj/{/.}.tree \
+#             --output data/meme/{/.}.meme; \
+#     fi' \
+#     :::: $MSA
 
-MEME=data/temp/MEME.temp
-find data/meme -type f > $MEME
-mkdir data/meme_reports
-parallel -j $THREADS \
-    "python scripts/hyphy_report.py \
-    -f {} \
-    -o data/meme_reports/{/.}.tsv \
-    -m meme" \
-    :::: $MEME
+# MEME=data/temp/MEME.temp
+# find data/meme -type f > $MEME
+# mkdir data/meme_reports
+# parallel -j $THREADS \
+#     "python scripts/hyphy_report.py \
+#     -f {} \
+#     -o data/meme_reports/{/.}.tsv \
+#     -m meme" \
+#     :::: $MEME
 
-mkdir data/fel
-parallel -j $THREADS \
-    'if [ -s "data/rapidnj/{/.}.tree" ]; then \
-        hyphy fel \
-            --alignment {} \
-            --tree data/rapidnj/{/.}.tree \
-            --output data/fel/{/.}.fel; \
-    fi' \
-    :::: $MSA
+# MREPORTS=data/temp/MREPORTS.temp
+# find data/meme_reports -type f > $MREPORTS
+# mkdir data/reports
+# parallel -j $THREADS \
+#     'python scripts/hyphy_extract.py -f {} -g {/.} -m meme >> data/reports/meme_report.tsv' \
+#     :::: $MREPORTS
 
-FEL=data/temp/FEL.temp
-find data/fel -type f > $FEL
-mkdir data/fel_reports
-parallel -j $THREADS \
-    "python scripts/hyphy_report.py \
-    -f {} \
-    -o data/fel_reports/{/.}.tsv \
-    -m fel" \
-    :::: $FEL
+# mkdir data/fel
+# parallel -j $THREADS \
+#     'if [ -s "data/rapidnj/{/.}.tree" ]; then \
+#         hyphy fel \
+#             --alignment {} \
+#             --tree data/rapidnj/{/.}.tree \
+#             --output data/fel/{/.}.fel; \
+#     fi' \
+#     :::: $MSA
 
-mkdir data/slac
-parallel -j $THREADS \
-    'if [ -s "data/rapidnj/{/.}.tree" ]; then \
-        hyphy slac \
-            --alignment {} \
-            --tree data/rapidnj/{/.}.tree \
-            --output data/slac/{/.}.slac; \
-    fi' \
-    :::: $MSA
+# FEL=data/temp/FEL.temp
+# find data/fel -type f > $FEL
+# mkdir data/fel_reports
+# parallel -j $THREADS \
+#     "python scripts/hyphy_report.py \
+#     -f {} \
+#     -o data/fel_reports/{/.}.tsv \
+#     -m fel" \
+#     :::: $FEL
 
-SLAC=data/temp/SLAC.temp
-find data/slac -type f > $SLAC
-mkdir data/slac_reports
-parallel -j $THREADS \
-    "echo {} && \
-    python scripts/hyphy_report.py \
-    -f {} \
-    -o data/slac_reports/{/.}.tsv \
-    -m slac" \
-    :::: $SLAC
+# FREPORTS=data/temp/FREPORTS.temp
+# find data/fel_reports -type f > $FREPORTS
+# parallel -j $THREADS \
+#     'python scripts/hyphy_extract.py -f {} -g {/.} -m fel >> data/reports/fel_report.tsv' \
+#     :::: $FREPORTS
 
-mkdir data/codeml_ctl
-parallel -j $THREADS \
-    "sed 's|stewart\.aa|{}|g; \
-    s|mlc|data/codeml/{/.}.cml|g; \
-    s|stewart\.trees|data/rapidnj/{/.}.tree|g' \
-    config/codeml_default.ctl > data/codeml_ctl/{/.}.ctl" \
-    :::: $MSA
+# mkdir data/slac
+# parallel -j $THREADS \
+#     'if [ -s "data/rapidnj/{/.}.tree" ]; then \
+#         hyphy slac \
+#             --alignment {} \
+#             --tree data/rapidnj/{/.}.tree \
+#             --output data/slac/{/.}.slac; \
+#     fi' \
+#     :::: $MSA
 
-CTL=data/temp/CTL.temp
-find data/codeml_ctl -type f > $CTL
-mkdir data/codeml
-parallel -j $THREADS "codeml {}" :::: $CTL
+# SLAC=data/temp/SLAC.temp
+# find data/slac -type f > $SLAC
+# mkdir data/slac_reports
+# parallel -j $THREADS \
+#     "echo {} && \
+#     python scripts/hyphy_report.py \
+#     -f {} \
+#     -o data/slac_reports/{/.}.tsv \
+#     -m slac" \
+#     :::: $SLAC
+
+# SREPORTS=data/temp/SREPORTS.temp
+# find data/slac_reports -type f > $SREPORTS
+# parallel -j $THREADS \
+#     'python scripts/hyphy_extract.py -f {} -g {/.} -m slac >> data/reports/slac_report.tsv' \
+#     :::: $SREPORTS
+
+# mkdir data/codeml_ctl
+# parallel -j $THREADS \
+#     "sed 's|stewart\.aa|{}|g; \
+#     s|mlc|data/codeml/{/.}.cml|g; \
+#     s|stewart\.trees|data/rapidnj/{/.}.tree|g' \
+#     config/codeml_default.ctl > data/codeml_ctl/{/.}.ctl" \
+#     :::: $MSA
+
+# CTL=data/temp/CTL.temp
+# find data/codeml_ctl -type f > $CTL
+# mkdir data/codeml
+# parallel -j $THREADS "codeml {}" :::: $CTL
+
+# CML=data/temp/CML.temp
+# find data/codeml -type f > $CML
+# parallel -j $THREADS 'value=$(grep "w (dN/dS) for branches:" {} | awk "{print \$NF}") && echo -e "{/.}\t$value" >> data/reports/cml_report.tsv' :::: $CML
+
+python scripts/report_table.py
 
 # mkdir data/consensus
 # parallel -j $THREADS \
