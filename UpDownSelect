@@ -6,29 +6,30 @@ THREADS=$2
 # datasets download genome taxon "staphylococcus aureus" \
 #     --assembly-level complete \
 #     --exclude-atypical \
+#     --assembly-source 'RefSeq' \
+#     --dehydrated \
 #     --filename "${INPUT_DIR}.zip"
 
-# unzip -n "${INPUT_DIR}.zip"
-# if [ "$INPUT_DIR" != "ncbi_dataset" ]; then
-#     mv ncbi_dataset $INPUT_DIR
-# fi
+unzip -n "${INPUT_DIR}.zip"
 
-# mkdir -p data/genomes/
-# GENOMES=$(find $INPUT_DIR -name "*.fna")
-# for file in $GENOMES; do
-#     base=$(basename $file | cut -d "_" -f -2)
-#     awk -i inplace '{gsub(/^>.*$/, ">" "'"$base"'" "_" (++c)); print}' $file
-#     cp $file data/genomes/$base.fna; done
+# datasets rehydrate --directory .
 
-# mkdir data/prokka/
-# FNA=$(find "data/genomes" -name "*.fna")
-# parallel -j $THREADS \
-#     prokka \
-#         --cpus 1 \
-#         --prefix {/.} \
-#         --locustag {/.} \
-#         --outdir data/prokka/{/.} {} \
-#     ::: "${FNA[@]}"
+mkdir -p data/genomes/
+GENOMES=$(find $INPUT_DIR -name "*.fna")
+for file in $GENOMES; do
+    base=$(basename $file | cut -d "_" -f -2)
+    # awk -i inplace '{gsub(/^>.*$/, ">" "'"$base"'" "_" (++c)); print}' $file
+    cp $file data/genomes/$base.fna; done
+
+mkdir data/prokka/
+FNA=$(find "data/genomes" -name "*.fna")
+parallel -j 1 \
+    prokka \
+        --cpus $THREADS \
+        --prefix {/.} \
+        --locustag {/.} \
+        --outdir data/prokka/{/.} {} \
+    ::: "${FNA[@]}"
 
 # FFN=$(find "data/prokka/" -name "*.ffn")
 # parallel -j $THREADS \
@@ -219,14 +220,14 @@ THREADS=$2
 # mkdir data/codeml
 # parallel -j $THREADS "codeml {}" :::: $CTL
 
-CML=data/temp/CML.temp
-find data/codeml -type f > $CML
-parallel -j $THREADS 'value=$(grep "w (dN/dS) for branches:" {} | awk "{print \$NF}") && echo -e "{/.}\t$value" >> data/reports/cml_report.tsv' :::: $CML
+# CML=data/temp/CML.temp
+# find data/codeml -type f > $CML
+# parallel -j $THREADS 'value=$(grep "w (dN/dS) for branches:" {} | awk "{print \$NF}") && echo -e "{/.}\t$value" >> data/reports/cml_report.tsv' :::: $CML
 
-abritamr run -c data/roary/pan_genome_reference.fa -j $THREADS --prefix data/abritamr
-awk -F'\t' '{gsub(/\(|\)/,"_"); print $6 "\t" $9}' data/abritamr/amrfinder.out > data/reports/abritamr_report.tsv
+# abritamr run -c data/roary/pan_genome_reference.fa -j $THREADS --prefix data/abritamr
+# awk -F'\t' '{gsub(/\(|\)/,"_"); print $6 "\t" $9}' data/abritamr/amrfinder.out > data/reports/abritamr_report.tsv
 
-python scripts/report_table.py
+# python scripts/report_table.py
 
 # mkdir data/consensus
 # parallel -j $THREADS \

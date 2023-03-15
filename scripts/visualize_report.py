@@ -15,10 +15,12 @@ import matplotlib.pyplot as plt
 # Load your dataframe
 df = pd.read_csv("data/reports/report_table_no_NaN.tsv", sep="\t")
 abritamr_codes, _ = pd.factorize(df["abritamr"])
-abritamr_order = ["BASE", "VIRULENCE", "AMR"]
+abritamr_order = ["BASE", "VIRULENCE"]
 df["abritamr"] = pd.Categorical(df["abritamr"], categories=abritamr_order)
 df = df.sort_values("abritamr")
 abritamr_codes, _ = pd.factorize(df["abritamr"])
+
+# Create the scatter plots
 for i, col1 in enumerate(["meme", "fel", "slac", "codeml"]):
     for j, col2 in enumerate(["meme", "fel", "slac", "codeml"]):
         if i < j:
@@ -33,4 +35,10 @@ for i, col1 in enumerate(["meme", "fel", "slac", "codeml"]):
             cbar.set_ticks(range(len(abritamr_order)))
             cbar.set_ticklabels(abritamr_order)
             
-            plt.show()
+            # Add a horizontal line
+            plt.axhline(y=0.01, color='r', linestyle='--')
+            plt.axvline(x=0.01, color='r', linestyle='--')
+            
+
+            filename = f"plots/{col1}_{col2}_big.png"
+            plt.savefig(filename)
