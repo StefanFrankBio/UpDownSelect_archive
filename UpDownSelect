@@ -10,74 +10,72 @@ THREADS=$2
 #     --dehydrated \
 #     --filename "${INPUT_DIR}.zip"
 
-unzip -n "${INPUT_DIR}.zip"
+# unzip -n "${INPUT_DIR}.zip"
 
 # datasets rehydrate --directory .
 
-mkdir -p data/genomes/
-GENOMES=$(find $INPUT_DIR -name "*.fna")
-for file in $GENOMES; do
-    base=$(basename $file | cut -d "_" -f -2)
-    # awk -i inplace '{gsub(/^>.*$/, ">" "'"$base"'" "_" (++c)); print}' $file
-    cp $file data/genomes/$base.fna; done
+# mkdir -p data/genomes/
+# GENOMES=$(find $INPUT_DIR -name "*.fna")
+# for file in $GENOMES; do
+#     base=$(basename $file | cut -d "_" -f -2)
+#     # awk -i inplace '{gsub(/^>.*$/, ">" "'"$base"'" "_" (++c)); print}' $file
+#     cp $file data/genomes/$base.fna; done
 
-mkdir data/prokka/
-FNA=$(find "data/genomes" -name "*.fna")
-parallel -j 1 \
-    prokka \
-        --cpus $THREADS \
-        --prefix {/.} \
-        --locustag {/.} \
-        --outdir data/prokka/{/.} {} \
-    ::: "${FNA[@]}"
-
-# FFN=$(find "data/prokka/" -name "*.ffn")
+# mkdir data/prokka/
+# FNA=$(find "data/genomes" -name "*.fna")
 # parallel -j $THREADS \
-#     "seqkit split \
-#         -i \
-#         --by-id-prefix '' \
-#         --out-dir data/seqkit/{/.} {}" \
-#     ::: "${FFN[@]}"
+#     prokka \
+#         --cpus 1 \
+#         --prefix {/.} \
+#         --locustag {/.} \
+#         --outdir data/prokka/{/.} {} \
+#     ::: "${FNA[@]}"
 
-# GFF=$(find "data/prokka" -name "*.gff")
-# roary \
-#     -f data/roary \
-#     -e \
-#     --mafft \
-#     -p $THREADS \
-#     $GFF 
+FFN=$(find "data/prokka/" -name "*.ffn")
+parallel -j $THREADS \
+    "seqkit split \
+        -i \
+        --by-id-prefix '' \
+        --out-dir data/seqkit/{/.} {}" \
+    ::: "${FFN[@]}"
 
-# PAN_TABLE="data/roary/gene_presence_absence.csv"
-# GENES="data/temp/genes.temp"
-# dos2unix $PAN_TABLE
-# mkdir data/temp
-# cut -d "," -f1 "$PAN_TABLE" > $GENES
-# sed -i 's/[\t/'\''() ]/_/g' $GENES
+GFF=$(find "data/prokka" -name "*.gff")
+roary \
+    -f data/roary \
+    -e \
+    --mafft \
+    -p $THREADS \
+    $GFF 
 
-# PAN_TABLE_TEMP="data/temp/gene_presence_absence.temp"
-# GFF_COUNT=$(echo "$GFF" | wc -l)
-# while read -r line; do
-#   rev_line=$(echo "$line" | rev | cut -d "," -f-$GFF_COUNT | rev)
-#   echo "$rev_line" >> "$PAN_TABLE_TEMP"
-# done < "$PAN_TABLE"
+PAN_TABLE="data/roary/gene_presence_absence.csv"
+GENES="data/temp/genes.temp"
+dos2unix $PAN_TABLE
+mkdir data/temp
+cut -d "," -f1 "$PAN_TABLE" > $GENES
+sed -i 's/[\t/'\''() ]/_/g' $GENES
 
-# PAN_TABLE_FILTERED="data/roary/gene_presence_absence_filtered.tsv"
-# paste -d "," $GENES "$PAN_TABLE_TEMP" > "$PAN_TABLE_FILTERED"
-# sed -i '1d' "$PAN_TABLE_FILTERED"
-# sed -i 's/,/\t/g' "$PAN_TABLE_FILTERED"
-# sed -i 's/"//g' "$PAN_TABLE_FILTERED"
+PAN_TABLE_TEMP="data/temp/gene_presence_absence.temp"
+GFF_COUNT=$(echo "$GFF" | wc -l)
+while read -r line; do
+  rev_line=$(echo "$line" | rev | cut -d "," -f-$GFF_COUNT | rev)
+  echo "$rev_line" >> "$PAN_TABLE_TEMP"
+done < "$PAN_TABLE"
+
+PAN_TABLE_FILTERED="data/roary/gene_presence_absence_filtered.tsv"
+paste -d "," $GENES "$PAN_TABLE_TEMP" > "$PAN_TABLE_FILTERED"
+sed -i '1d' "$PAN_TABLE_FILTERED"
+sed -i 's/,/\t/g' "$PAN_TABLE_FILTERED"
+sed -i 's/"//g' "$PAN_TABLE_FILTERED"
 
 # mkdir data/per_gene
 # while IFS= read -r line; do
 #     dir=$(awk '{print $1}' <<< "$line")
 #     loci=$(awk '{$1=""; print $0}' <<< "$line")
-#     if [[ $(echo $loci | wc -w) -ge $GFF_COUNT ]]; then
-#         mkdir data/per_gene/$dir
-#         for locus in $loci; do
-#             base=$(echo $locus | cut -d "_" -f -2)
-#             cp data/seqkit/$base/$locus.ffn data/per_gene/$dir/
-#             done
-#     fi
+#     mkdir data/per_gene/$dir
+#     for locus in $loci; do
+#         base=$(echo $locus | cut -d "_" -f -2)
+#         mv data/seqkit/$base/$locus.ffn data/per_gene/$dir/
+#         done
 # done < $PAN_TABLE_FILTERED
 
 # PER_GENE=data/temp/PER_GENE.temp

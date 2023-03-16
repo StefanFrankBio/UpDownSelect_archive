@@ -9,3 +9,6 @@
 - Trees can have branch lengths of -0, if there are only indels but no substitution, causing errors during SLAC analysis
 - How to distinguish between significant positive and negativ selection in MEME, FEL and SLAC report
 - Extracting report data for visualization
+- Column in Report that shows sample percentage
+- Column in report that shows gene source (chromosome or plasmid)
+- RNA Sequences are excluded from roarys pa-matrix
