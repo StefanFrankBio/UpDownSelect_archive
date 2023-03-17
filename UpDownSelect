@@ -10,23 +10,22 @@ INPUT_DIR=$1
 OUTPUT_DIR=$2
 THREADS=$3
 
-datasets download genome taxon "staphylococcus aureus" \
-    --assembly-level complete \
-    --exclude-atypical \
-    --assembly-source 'RefSeq' \
-    --dehydrated \
-    --filename "${INPUT_DIR}.zip"
+# datasets download genome taxon "staphylococcus aureus" \
+#     --assembly-level complete \
+#     --exclude-atypical \
+#     --assembly-source 'RefSeq' \
+#     --dehydrated \
+#     --filename "${INPUT_DIR}.zip"
 
-unzip -n "${INPUT_DIR}.zip"
+# unzip -n "${INPUT_DIR}.zip"
 
-datasets rehydrate --directory .
+# datasets rehydrate --directory .
 
-mkdir -p $OUTPUT_DIR/genomes/
-GENOMES=$(find $INPUT_DIR -name "*.fna" | shuf -n 3)
-for file in $GENOMES; do
-    base=$(basename $file | cut -d "_" -f -2)
-    # awk -i inplace '{gsub(/^>.*$/, ">" "'"$base"'" "_" (++c)); print}' $file
-    cp $file $OUTPUT_DIR/genomes/$base.fna; done
+# mkdir -p $OUTPUT_DIR/genomes/
+# GENOMES=$(find $INPUT_DIR -name "*.fna")
+# for file in $GENOMES; do
+#     base=$(basename $file | cut -d "_" -f -2)
+#     cp $file $OUTPUT_DIR/genomes/$base.fna; done
 
 mkdir $OUTPUT_DIR/prokka/
 FNA=$(find "$OUTPUT_DIR/genomes" -name "*.fna")
@@ -54,26 +53,10 @@ roary \
     -p $THREADS \
     $GFF 
 
-PAN_TABLE="$OUTPUT_DIR/roary/gene_presence_absence.csv"
-GENES="$OUTPUT_DIR/temp/genes.temp"
-dos2unix $PAN_TABLE
-mkdir $OUTPUT_DIR/temp
-cut -d "," -f1 "$PAN_TABLE" > $GENES
-sed -i 's/[\t/'\''() ]/_/g' $GENES
-
-PAN_TABLE_TEMP="$OUTPUT_DIR/temp/gene_presence_absence.temp"
-GFF_COUNT=$(echo "$GFF" | wc -l)
-while read -r line; do
-  rev_line=$(echo "$line" | rev | cut -d "," -f-$GFF_COUNT | rev)
-  echo "$rev_line" >> "$PAN_TABLE_TEMP"
-done < "$PAN_TABLE"
-
-PAN_TABLE_FILTERED="$OUTPUT_DIR/roary/gene_presence_absence_filtered.tsv"
-paste -d "," $GENES "$PAN_TABLE_TEMP" > "$PAN_TABLE_FILTERED"
-sed -i '1d' "$PAN_TABLE_FILTERED"
-sed -i 's/,/\t/g' "$PAN_TABLE_FILTERED"
-sed -i 's/"//g' "$PAN_TABLE_FILTERED"
-
+mkdir $OUTPUT_DIR/temp/
+PAN_TABLE="$OUTPUT_DIR/temp/PAN_TABLE.temp"
+sed -i 's/: /\t/g' $OUTPUT_DIR/roary/clustered_proteins
+awk -F '\t' -v OFS='\t' -v col=1 '{ gsub(/[^[:alnum:]_-]/, "_", $col); print }' $OUTPUT_DIR/roary/clustered_proteins > $PAN_TABLE
 mkdir $OUTPUT_DIR/per_gene
 while IFS= read -r line; do
     dir=$(awk '{print $1}' <<< "$line")
@@ -81,9 +64,9 @@ while IFS= read -r line; do
     mkdir $OUTPUT_DIR/per_gene/$dir
     for locus in $loci; do
         base=$(echo $locus | cut -d "_" -f -2)
-        mv $OUTPUT_DIR/seqkit/$base/$locus.ffn $OUTPUT_DIR/per_gene/$dir/
+        cp $OUTPUT_DIR/seqkit/$base/$locus.ffn $OUTPUT_DIR/per_gene/$dir/
         done
-done < $PAN_TABLE_FILTERED
+done < $PAN_TABLE
 
 PER_GENE=$OUTPUT_DIR/temp/PER_GENE.temp
 find $OUTPUT_DIR/per_gene/ -type f > $PER_GENE
@@ -146,94 +129,90 @@ parallel -j $THREADS \
         --output $OUTPUT_DIR/meme/{/.}.meme" \
     :::: $MSA
 
-MEME=$OUTPUT_DIR/temp/MEME.temp
-find $OUTPUT_DIR/meme -type f > $MEME
-mkdir $OUTPUT_DIR/meme_reports
-parallel -j $THREADS \
-    "python scripts/hyphy_report.py \
-    -f {} \
-    -o $OUTPUT_DIR/meme_reports/{/.}.tsv \
-    -m meme" \
-    :::: $MEME
+# MEME=$OUTPUT_DIR/temp/MEME.temp
+# find $OUTPUT_DIR/meme -type f > $MEME
+# mkdir $OUTPUT_DIR/meme_reports
+# parallel -j $THREADS \
+#     "python scripts/hyphy_report.py \
+#     -f {} \
+#     -o $OUTPUT_DIR/meme_reports/{/.}.tsv \
+#     -m meme" \
+#     :::: $MEME
 
-MREPORTS=$OUTPUT_DIR/temp/MREPORTS.temp
-find $OUTPUT_DIR/meme_reports -type f > $MREPORTS
-mkdir $OUTPUT_DIR/reports
-parallel -j $THREADS \
-    'python scripts/hyphy_extract.py -f {} -g {/.} -m meme >> $OUTPUT_DIR/reports/meme_report.tsv' \
-    :::: $MREPORTS
+# MREPORTS=$OUTPUT_DIR/temp/MREPORTS.temp
+# find $OUTPUT_DIR/meme_reports -type f > $MREPORTS
+# mkdir $OUTPUT_DIR/reports
+# parallel -j $THREADS \
+#     'python scripts/hyphy_extract.py -f {} -g {/.} -m meme >> $OUTPUT_DIR/reports/meme_report.tsv' \
+#     :::: $MREPORTS
 
-mkdir $OUTPUT_DIR/fel
-parallel -j $THREADS \
-    'if [ -s "$OUTPUT_DIR/rapidnj/{/.}.tree" ]; then \
-        hyphy fel \
-            --alignment {} \
-            --tree $OUTPUT_DIR/rapidnj/{/.}.tree \
-            --output $OUTPUT_DIR/fel/{/.}.fel; \
-    fi' \
-    :::: $MSA
+# mkdir $OUTPUT_DIR/fel
+# parallel -j $THREADS \
+#         "hyphy fel \
+#             --alignment {} \
+#             --tree $OUTPUT_DIR/rapidnj/{/.}.tree \
+#             --output $OUTPUT_DIR/fel/{/.}.fel" \
+#     :::: $MSA
 
-FEL=$OUTPUT_DIR/temp/FEL.temp
-find $OUTPUT_DIR/fel -type f > $FEL
-mkdir $OUTPUT_DIR/fel_reports
-parallel -j $THREADS \
-    "python scripts/hyphy_report.py \
-    -f {} \
-    -o $OUTPUT_DIR/fel_reports/{/.}.tsv \
-    -m fel" \
-    :::: $FEL
+# FEL=$OUTPUT_DIR/temp/FEL.temp
+# find $OUTPUT_DIR/fel -type f > $FEL
+# mkdir $OUTPUT_DIR/fel_reports
+# parallel -j $THREADS \
+#     "python scripts/hyphy_report.py \
+#     -f {} \
+#     -o $OUTPUT_DIR/fel_reports/{/.}.tsv \
+#     -m fel" \
+#     :::: $FEL
 
-FREPORTS=$OUTPUT_DIR/temp/FREPORTS.temp
-find $OUTPUT_DIR/fel_reports -type f > $FREPORTS
-parallel -j $THREADS \
-    'python scripts/hyphy_extract.py -f {} -g {/.} -m fel >> $OUTPUT_DIR/reports/fel_report.tsv' \
-    :::: $FREPORTS
+# FREPORTS=$OUTPUT_DIR/temp/FREPORTS.temp
+# find $OUTPUT_DIR/fel_reports -type f > $FREPORTS
+# parallel -j $THREADS \
+#     'python scripts/hyphy_extract.py -f {} -g {/.} -m fel >> $OUTPUT_DIR/reports/fel_report.tsv' \
+#     :::: $FREPORTS
 
-mkdir $OUTPUT_DIR/slac
-parallel -j $THREADS \
-    'if [ -s "$OUTPUT_DIR/rapidnj/{/.}.tree" ]; then \
-        hyphy slac \
-            --alignment {} \
-            --tree $OUTPUT_DIR/rapidnj/{/.}.tree \
-            --output $OUTPUT_DIR/slac/{/.}.slac; \
-    fi' \
-    :::: $MSA
+# mkdir $OUTPUT_DIR/slac
+# parallel -j $THREADS \
+#         "hyphy slac \
+#             --alignment {} \
+#             --tree $OUTPUT_DIR/rapidnj/{/.}.tree \
+#             --output $OUTPUT_DIR/slac/{/.}.slac" \
+#     :::: $MSA
 
-SLAC=$OUTPUT_DIR/temp/SLAC.temp
-find $OUTPUT_DIR/slac -type f > $SLAC
-mkdir $OUTPUT_DIR/slac_reports
-parallel -j $THREADS \
-    "echo {} && \
-    python scripts/hyphy_report.py \
-    -f {} \
-    -o $OUTPUT_DIR/slac_reports/{/.}.tsv \
-    -m slac" \
-    :::: $SLAC
+# SLAC=$OUTPUT_DIR/temp/SLAC.temp
+# find $OUTPUT_DIR/slac -type f > $SLAC
+# mkdir $OUTPUT_DIR/slac_reports
+# parallel -j $THREADS \
+#     "echo {} && \
+#     python scripts/hyphy_report.py \
+#     -f {} \
+#     -o $OUTPUT_DIR/slac_reports/{/.}.tsv \
+#     -m slac" \
+#     :::: $SLAC
 
-SREPORTS=$OUTPUT_DIR/temp/SREPORTS.temp
-find $OUTPUT_DIR/slac_reports -type f > $SREPORTS
-parallel -j $THREADS \
-    'python scripts/hyphy_extract.py -f {} -g {/.} -m slac >> $OUTPUT_DIR/reports/slac_report.tsv' \
-    :::: $SREPORTS
+# SREPORTS=$OUTPUT_DIR/temp/SREPORTS.temp
+# find $OUTPUT_DIR/slac_reports -type f > $SREPORTS
+# parallel -j $THREADS \
+#     'python scripts/hyphy_extract.py -f {} -g {/.} -m slac >> $OUTPUT_DIR/reports/slac_report.tsv' \
+#     :::: $SREPORTS
 
-mkdir $OUTPUT_DIR/codeml_ctl
-parallel -j $THREADS \
-    "sed 's|stewart\.aa|{}|g; \
-    s|mlc|$OUTPUT_DIR/codeml/{/.}.cml|g; \
-    s|stewart\.trees|$OUTPUT_DIR/rapidnj/{/.}.tree|g' \
-    config/codeml_default.ctl > $OUTPUT_DIR/codeml_ctl/{/.}.ctl" \
-    :::: $MSA
+# mkdir $OUTPUT_DIR/codeml_ctl
+# parallel -j $THREADS \
+#     "sed 's|stewart\.aa|{}|g; \
+#     s|mlc|$OUTPUT_DIR/codeml/{/.}.cml|g; \
+#     s|stewart\.trees|$OUTPUT_DIR/rapidnj/{/.}.tree|g' \
+#     config/codeml_default.ctl > $OUTPUT_DIR/codeml_ctl/{/.}.ctl" \
+#     :::: $MSA
 
-CTL=$OUTPUT_DIR/temp/CTL.temp
-find $OUTPUT_DIR/codeml_ctl -type f > $CTL
-mkdir $OUTPUT_DIR/codeml
-parallel -j $THREADS "codeml {}" :::: $CTL
+# CTL=$OUTPUT_DIR/temp/CTL.temp
+# find $OUTPUT_DIR/codeml_ctl -type f > $CTL
+# mkdir $OUTPUT_DIR/codeml
+# parallel -j $THREADS "codeml {}" :::: $CTL
 
-CML=$OUTPUT_DIR/temp/CML.temp
-find $OUTPUT_DIR/codeml -type f > $CML
-parallel -j $THREADS 'value=$(grep "w (dN/dS) for branches:" {} | awk "{print \$NF}") && echo -e "{/.}\t$value" >> $OUTPUT_DIR/reports/cml_report.tsv' :::: $CML
+# CML=$OUTPUT_DIR/temp/CML.temp
+# find $OUTPUT_DIR/codeml -type f > $CML
+# parallel -j $THREADS 'value=$(grep "w (dN/dS) for branches:" {} | awk "{print \$NF}") && echo -e "{/.}\t$value" >> $OUTPUT_DIR/reports/cml_report.tsv' :::: $CML
 
-abritamr run -c $OUTPUT_DIR/roary/pan_genome_reference.fa -j $THREADS --prefix $OUTPUT_DIR/abritamr
-awk -F'\t' '{gsub(/\(|\)/,"_"); print $6 "\t" $9}' $OUTPUT_DIR/abritamr/amrfinder.out > $OUTPUT_DIR/reports/abritamr_report.tsv
+# abritamr run -c $OUTPUT_DIR/roary/pan_genome_reference.fa -j $THREADS --prefix $OUTPUT_DIR/abritamr
+# awk -F'\t' '{gsub(/\(|\)/,"_"); print $6 "\t" $9}' $OUTPUT_DIR/abritamr/amrfinder.out > $OUTPUT_DIR/reports/abritamr_report.tsv
 
-python scripts/report_table.py
+# python scripts/report_table.py
