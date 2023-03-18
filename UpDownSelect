@@ -46,13 +46,13 @@ THREADS=$3
 #         --out-dir $OUTPUT_DIR/seqkit/{/.} {}" \
 #     ::: "${FFN[@]}"
 
-# GFF=$(find "$OUTPUT_DIR/prokka" -name "*.gff")
+GFF=$(find "$OUTPUT_DIR/prokka" -name "*.gff")
 # roary \
 #     -f $OUTPUT_DIR/roary \
 #     -e \
 #     --mafft \
 #     -p $THREADS \
-#     $GFF 
+#     $GFF
 
 # mkdir $OUTPUT_DIR/temp/
 # PAN_TABLE="$OUTPUT_DIR/temp/PAN_TABLE.temp"
@@ -68,6 +68,15 @@ THREADS=$3
 #         cp $OUTPUT_DIR/seqkit/$base/$locus.ffn $OUTPUT_DIR/per_gene/$dir/
 #         done
 # done < $PAN_TABLE
+
+# mkdir $OUTPUT_DIR/reports
+# GFF_COUNT=$(echo "$GFF" | wc -l)
+# awk -F'\t' -v max="$GFF_COUNT" '
+# {
+#     seq_count = NF - 1;
+#     ratio = seq_count / max;
+#     printf("%s\t%.2f\n", $1, ratio);
+# }' $PAN_TABLE > $OUTPUT_DIR/reports/presence_report.tsv
 
 # PER_GENE=$OUTPUT_DIR/temp/PER_GENE.temp
 # find $OUTPUT_DIR/per_gene/ -type f > $PER_GENE
@@ -129,7 +138,7 @@ THREADS=$3
 #     "pal2nal.pl -output fasta {} $OUTPUT_DIR/rmdup/{/.}.fasta > $OUTPUT_DIR/pal2nal/{/.}.fasta" \
 #     :::: $MSA
 
-PAL2NAL=$OUTPUT_DIR/temp/PAL2NAL.temp
+# PAL2NAL=$OUTPUT_DIR/temp/PAL2NAL.temp
 # find $OUTPUT_DIR/pal2nal -type f > $PAL2NAL
 # mkdir $OUTPUT_DIR/rapidnj
 # parallel -j $THREADS \
@@ -159,7 +168,6 @@ PAL2NAL=$OUTPUT_DIR/temp/PAL2NAL.temp
 
 # MREPORTS=$OUTPUT_DIR/temp/MREPORTS.temp
 # find $OUTPUT_DIR/meme_reports -type f > $MREPORTS
-# mkdir $OUTPUT_DIR/reports
 # parallel -j $THREADS \
 #     "python scripts/hyphy_extract.py -f {} -g {/.} -m meme >> $OUTPUT_DIR/reports/meme_report.tsv" \
 #     :::: $MREPORTS
@@ -230,8 +238,8 @@ PAL2NAL=$OUTPUT_DIR/temp/PAL2NAL.temp
 # find $OUTPUT_DIR/codeml -type f > $CML
 # parallel -j $THREADS "value=\$(grep \"w (dN/dS) for branches:\" {} | awk \"{print \\\$NF}\") && echo -e \"{/.}\t\$value\" >> $OUTPUT_DIR/reports/cml_report.tsv" :::: $CML
 
-# abritamr run -c $OUTPUT_DIR/roary/pan_genome_reference.fa -j $THREADS --prefix $OUTPUT_DIR/abritamr
-# awk -F'\t' 'NR > 1 {gsub(/\(|\)/,"_"); print $6 "\t" $9}' $OUTPUT_DIR/abritamr/amrfinder.out > $OUTPUT_DIR/reports/abritamr_report.tsv
+abritamr run -c $OUTPUT_DIR/roary/pan_genome_reference.fa -j $THREADS --prefix $OUTPUT_DIR/abritamr
+awk -F'\t' 'NR > 1 {gsub(/\(|\)/,"_"); print $6 "\t" $9}' $OUTPUT_DIR/abritamr/amrfinder.out | sort | uniq > $OUTPUT_DIR/reports/abritamr_report.tsv
 
 # REPORTS=$(find $OUTPUT_DIR/reports/ -type f -name "*_report.tsv")
 # python scripts/report_table.py -f $REPORTS -o $OUTPUT_DIR/reports
