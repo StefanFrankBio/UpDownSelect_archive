@@ -1,17 +1,46 @@
+import argparse
 import pandas as pd
+# def main():
+#     df1 = pd.read_csv('data/reports/meme_report.tsv', sep='\t', header=None, names=['gene', 'meme'])
+#     df2 = pd.read_csv('data/reports/fel_report.tsv', sep='\t', header=None, names=['gene', 'fel'])
+#     df3 = pd.read_csv('data/reports/slac_report.tsv', sep='\t', header=None, names=['gene', 'slac'])
+#     df4 = pd.read_csv('data/reports/cml_report.tsv', sep='\t', header=None, names=['gene', 'codeml'])
+#     df5 = pd.read_csv('data/reports/abritamr_report.tsv', sep='\t', header=None, names=['gene', 'abritamr'])
+#     df_merged = pd.merge(df1, df2, on='gene', how='outer')
+#     df_merged = pd.merge(df_merged, df3, on='gene', how='outer')
+#     df_merged = pd.merge(df_merged, df4, on='gene', how='outer')
+#     df_merged = pd.merge(df_merged, df5, on='gene', how='outer')
+#     df_merged["abritamr"].fillna('BASE', inplace=True)
+#     df_merged.to_csv('data/reports/report_table.tsv', sep='\t', index=False)
+#     df_no_NaN = df_merged.dropna()
+#     df_no_NaN.to_csv('data/reports/report_table_no_NaN.tsv', sep='\t', index=False)
 
-df1 = pd.read_csv('data/temp/genes.temp', header=0, names=['gene'])
-df2 = pd.read_csv('data/reports/meme_report.tsv', sep='\t', header=None, names=['gene', 'meme'])
-df3 = pd.read_csv('data/reports/fel_report.tsv', sep='\t', header=None, names=['gene', 'fel'])
-df4 = pd.read_csv('data/reports/slac_report.tsv', sep='\t', header=None, names=['gene', 'slac'])
-df5 = pd.read_csv('data/reports/cml_report.tsv', sep='\t', header=None, names=['gene', 'codeml'])
-df6 = pd.read_csv('data/reports/abritamr_report.tsv', sep='\t', header=None, names=['gene', 'abritamr'])
-df_merged = pd.merge(df1, df2, on='gene', how='left')
-df_merged = pd.merge(df_merged, df3, on='gene', how='left')
-df_merged = pd.merge(df_merged, df4, on='gene', how='left')
-df_merged = pd.merge(df_merged, df5, on='gene', how='left')
-df_merged = pd.merge(df_merged, df6, on='gene', how='left')
-df_merged["abritamr"].fillna('BASE', inplace=True)
-df_merged.to_csv('data/reports/report_table.tsv', sep='\t', index=False)
-df_no_NaN = df_merged.dropna()
-df_no_NaN.to_csv('data/reports/report_table_no_NaN.tsv', sep='\t', index=False)
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-f", "--files", nargs='+')
+    parser.add_argument("-o", "--outdir")
+    return parser.parse_args()
+
+def main():
+    args = parse_args()
+    report_files = args.files
+
+    first_file = report_files.pop(0)
+    df_merged = pd.read_csv(first_file, sep='\t', header=None)
+    df_merged.columns = ['gene', first_file[:-11]]
+
+    for file_name in report_files:
+        df = pd.read_csv(file_name, sep='\t', header=None, names=['gene', file_name[:-11]])
+        df_merged = pd.merge(df_merged, df, on='gene', how='outer')
+
+    abritamr_col = 'data/reports/abritamr'
+    if abritamr_col in df_merged.columns:
+        df_merged[abritamr_col].fillna('BASE', inplace=True)
+
+    df_merged.to_csv(f'{args.outdir}/report_table.tsv', sep='\t', index=False)
+
+    df_no_NaN = df_merged.dropna()
+    df_no_NaN.to_csv(f'{args.outdir}/report_table_no_NaN.tsv', sep='\t', index=False)
+
+if __name__ == '__main__':
+    main()
