@@ -35,7 +35,7 @@ def calculate_ratios():
     ratios = {}
     for codon in codons:
         subs = get_substitutions(codon)
-        same_aa_count = sum(1 for sub in subs if codon_to_aa[codon] == codon_to_aa[sub])
+        same_aa_count = sum(1 for sub in subs if codon_to_aa[codon] != codon_to_aa[sub])
         ratio = same_aa_count / len(subs)
         ratios[codon] = ratio
     return ratios
