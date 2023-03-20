@@ -24,3 +24,5 @@ dependencies:
   - matplotlib=3.5.3
   - emboss=6.6.0
   - pal2nal=14.1
+  - ipykernel=6.15.2
+  - seaborn=0.12.2
