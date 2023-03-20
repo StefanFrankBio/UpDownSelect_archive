@@ -270,7 +270,7 @@ PAL2NAL=$OUTPUT_DIR/temp/PAL2NAL.temp
 
 # mkdir $OUTPUT_DIR/dNdS
 # parallel -j $THREADS \
-#     "python scripts/new_dNdS.py \
+#     "python scripts/dNdS.py \
 #     -c data/consensus/{/.}.cons \
 #     -v {} \
 #     -o $OUTPUT_DIR/dNdS/{/.}.tsv" \
