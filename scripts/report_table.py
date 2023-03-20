@@ -1,4 +1,5 @@
 import argparse
+import os
 import pandas as pd
 
 def parse_args():
@@ -12,14 +13,16 @@ def main():
     report_files = args.files
 
     first_file = report_files.pop(0)
+    first_file_name = os.path.basename(first_file)[:-11]
     df_merged = pd.read_csv(first_file, sep='\t', header=None)
-    df_merged.columns = ['gene', first_file[:-11]]
+    df_merged.columns = ['gene', first_file_name]
 
     for file_name in report_files:
-        df = pd.read_csv(file_name, sep='\t', header=None, names=['gene', file_name[:-11]])
+        file_name_no_path = os.path.basename(file_name)[:-11]
+        df = pd.read_csv(file_name, sep='\t', header=None, names=['gene', file_name_no_path])
         df_merged = pd.merge(df_merged, df, on='gene', how='outer')
 
-    abritamr_col = 'data/reports/abritamr'
+    abritamr_col = 'abritamr'
     if abritamr_col in df_merged.columns:
         df_merged[abritamr_col].fillna('BASE', inplace=True)
 
