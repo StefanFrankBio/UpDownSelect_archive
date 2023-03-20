@@ -261,12 +261,27 @@ PAL2NAL=$OUTPUT_DIR/temp/PAL2NAL.temp
 # abritamr run -c $OUTPUT_DIR/roary/pan_genome_reference.fa -j $THREADS --prefix $OUTPUT_DIR/abritamr
 # awk -F'\t' 'NR > 1 {gsub(/\(|\)/,"_"); print $6 "\t" $9}' $OUTPUT_DIR/abritamr/amrfinder.out | sort | uniq > $OUTPUT_DIR/reports/abritamr_report.tsv
 
-# REPORTS=$(find $OUTPUT_DIR/reports/ -type f -name "*_report.tsv")
-# python scripts/report_table.py -f $REPORTS -o $OUTPUT_DIR/reports
+# mkdir $OUTPUT_DIR/consensus
+# parallel -j $THREADS \
+#     "cons -sequence {} \
+#     -outseq $OUTPUT_DIR/consensus/{/.}.cons \
+#     -name {/.}" \
+#     :::: $PAL2NAL
 
-mkdir $OUTPUT_DIR/consensus
-parallel -j $THREADS \
-    "cons -sequence {} \
-    -outseq $OUTPUT_DIR/consensus/{/.}.cons \
-    -name {/.}" \
-    :::: $PAL2NAL
+# mkdir $OUTPUT_DIR/dNdS
+# parallel -j $THREADS \
+#     "python scripts/new_dNdS.py \
+#     -c data/consensus/{/.}.cons \
+#     -v {} \
+#     -o $OUTPUT_DIR/dNdS/{/.}.tsv" \
+#     :::: $PAL2NAL
+
+# DNDS=$OUTPUT_DIR/temp/DNDS.temp
+# find $OUTPUT_DIR/dNdS -type f > $DNDS
+# parallel -j $THREADS \
+#     "python scripts/dNdS_report.py \
+#     -i {} -g {/.} >> $OUTPUT_DIR/reports/dNdS_report.tsv" \
+#     :::: $DNDS
+
+REPORTS=$(find $OUTPUT_DIR/reports/ -type f -name "*_report.tsv")
+python scripts/report_table.py -f $REPORTS -o $OUTPUT_DIR/reports
