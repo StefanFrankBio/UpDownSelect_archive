@@ -1,12 +1,12 @@
 import argparse
-from Bio import SeqIO
+import json
 import re
-import itertools
-import statistics
+from Bio import SeqIO
+from Bio.Data import CodonTable
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-r", "--reference")
+    parser.add_argument("-c", "--consensus" )
     parser.add_argument("-v", "--variant")
     parser.add_argument("-o", "--output")
     return parser.parse_args()
@@ -17,68 +17,61 @@ def read_fasta(filepath, multi=False):
     else:
         return next(SeqIO.parse(filepath, "fasta"))
 
-def findall(regex, sequence):
-    return re.findall(f"{regex}", sequence)
+args = parse_args()
+consensus = read_fasta(args.consensus)
+gene = consensus.id
+consensus = str(consensus.seq).upper()
+variants = read_fasta(args.variant, multi=True)
 
-def single_substitutions(codon):
-    substitutions = []
-    for i, nt in enumerate(codon):
-        possible_subs = ["A", "C", "G", "T"]
-        possible_subs.remove(nt)
-        for sub in possible_subs:
-            substitutions.append(codon[:i] + sub + codon[i+1:])
-    return substitutions
+json_file_path = 'output.json'
+with open('resources/codon_ratios.json', 'r') as file:
+    codon_data = json.load(file)
+codons_consensus = re.findall(r'...', consensus)
+codons_consensus_no_N = [codon for codon in codon_data if 'N' not in codon]
+N = sum(codon_data[codon] for codon in codons_consensus_no_N) / len(codons_consensus_no_N)
+S = 1 - N
 
-def build_trans_table():
-    nucs = "TCAG"
-    aminos = "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
-    codons = (itertools.product(nucs, nucs, nucs))
-    codons = ["".join(tpl) for tpl in codons]
-    return dict(zip(codons, aminos))
+with open(args.output, 'w') as outfile:
+    header = ['id', 'N', 'S', 'NS', 'SS', 'dN', 'dS', 'dNdS']
+    print('\t'.join(header), file=outfile)
+    for variant in variants:
+        variant_id = str(variant.id)
+        codons_variant = re.findall(r'...', str(variant.seq))
 
-def main():
-    args = parse_args()
-    reference = read_fasta(args.reference)
-    ref_seq = str(reference.seq).upper()
-    ref_codons = findall('...', ref_seq)
-    trans_table = build_trans_table()
-    ns_ratios = []
-    for codon in ref_codons:
-        if 'N' not in codon:
-            substitutions = single_substitutions(codon)
-            trans_codon = trans_table[codon]
-            trans_subs = [trans_table[sub] for sub in substitutions]
-            ns_ratios += [tsub == trans_codon for tsub in trans_subs]
-    print(ns_ratios)
-    variants = read_fasta(args.variant, multi=True)
-    with open(f"{args.output}.dnds", 'w') as outfile:
-        print(*['ID', 'dN/dS', 'dN', 'dS', 'status'], file=outfile, sep='\t')
-        for variant in variants:
-            var_seq = str(variant.seq)
-            internal_gaps_var = var_seq.strip('-').count('-')
-            if ref_seq == var_seq:
-                print(*[variant.id, -1, 0, 0, 'identical'], file=outfile, sep='\t')
-            # elif internal_gaps % 3 != 0:
-            # elif internal_gaps_ref - internal_gaps_var != 0:
-            #     print(*[variant.id, -1, 0, 0, 'frame_shifted'], file=outfile, sep='\t')
-            #     print(reference.id, variant.id, 'frame shifted!')
-            else:
-                test = [(i, v) for i, (r, v) in enumerate(zip(ref_seq, var_seq)) if r != v and v != '-']
-                test2 = []
-                for tpl in test:
-                    ref_codon = ref_codons[tpl[0]//3]
-                    if 'N' not in ref_codon:                        
-                        var_codon = ref_codon[:tpl[0]%3] + tpl[1] + ref_codon[tpl[0]%3+1:]
-                        test2.append(trans_table[ref_codon] == trans_table[var_codon])
-                ns_ratio = statistics.mean(ns_ratios)
-                dN = (len(test2)-sum(test2))/(1-ns_ratio)
-                print(ns_ratio)
-                dS = sum(test2)/ns_ratio
-                if dS:
-                    dNdS = dN/dS
-                    print(*[variant.id, dNdS, dN, dS, 'passed'], file=outfile, sep='\t')
-                else:
-                    print(*[variant.id, -1, 0, 0, 'dS = 0'], file=outfile, sep='\t')
+        stop_codons = {'TAA', 'TAG', 'TGA'}
+        invalid_characters = {'N', '-'}
 
-if __name__ == '__main__':
-    main()
+        different_codons = [(c1, c1[:i] + c2[i] + c1[i+1:])
+                            for c1, c2 in zip(codons_consensus, codons_variant)
+                            for i, (b1, b2) in enumerate(zip(c1, c2)) if b1 != b2]
+        
+        filtered_different_codons = [codon_pair for codon_pair in different_codons
+                                    if not (set(codon_pair[0]) & invalid_characters) and not (set(codon_pair[1]) & invalid_characters)
+                                    and codon_pair[0] not in stop_codons and codon_pair[1] not in stop_codons]
+
+        different_codons = filtered_different_codons
+
+
+        standard_table = CodonTable.unambiguous_dna_by_id[1]
+
+        print(gene, variant_id)
+        print(different_codons)
+        different_amino_acids = [standard_table.forward_table[codon_consensus] != standard_table.forward_table[codon_sequence]
+                                 for codon_consensus, codon_sequence in different_codons]
+
+
+        NS = sum(different_amino_acids)
+        SS = len(different_amino_acids) - NS
+
+        dN = NS / N
+        dS = SS / S
+        if dS == 0:
+            dNdS = 'divZero'
+        else:
+            dNdS = dN / dS
+        output_list = [variant_id, N, S, NS, SS, dN, dS, dNdS]
+        output_list = [str(i) for i in output_list]
+
+        print('\t'.join(output_list), file=outfile)
+
+
