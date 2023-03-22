@@ -1,287 +1,42 @@
-#!/bin/bash
-#SBATCH --job-name=UpDownSelect
-#SBATCH --output=UpDownSelect_output.log
-#SBATCH --error=UpDownSelect_error.log
-#SBATCH --time=48:00:00
-#SBATCH --cpus-per-task=100
-#SBATCH --mem=400GB
+// process EXAMPLE {
+//     output:
+//     stdout
 
-INPUT_DIR=$1
-OUTPUT_DIR=$2
-THREADS=$3
+//     """
+//     printf ${params.greeting}
+//     """
+// }
 
-# datasets download genome taxon "staphylococcus aureus" \
-#     --assembly-level complete \
-#     --exclude-atypical \
-#     --assembly-source 'RefSeq' \
-#     --dehydrated \
-#     --filename "${INPUT_DIR}.zip"
+params.input_dir = "$baseDir/ncbi_dataset"
+fasta_ch = Channel.fromPath("$params.input_dir/data**/*.fna")
 
-# unzip -n "${INPUT_DIR}.zip"
+process prepare_genome {
+    
+    input:
+    path fasta
 
-# datasets rehydrate --directory .
+    output:
+    path "*.fna"
 
-# mkdir -p $OUTPUT_DIR/genomes/
-# GENOMES=$(find $INPUT_DIR -name "*.fna")
-# # GENOMES=$(find $INPUT_DIR -name "*.fna" | shuf -n 12)
-# for file in $GENOMES; do
-#     base=$(basename $file | cut -d "_" -f -2)
-#     awk '/^>/ {if (c == 0) {print ">chromosome"; c = 1} else {print ">plasmid_" ++i}} !/^>/ {print}' $file > $OUTPUT_DIR/genomes/$base.fna
-#     done
+    """
+    python $baseDir/scripts/prepare_genome.py -f $fasta
+    """
+}
 
-# mkdir $OUTPUT_DIR/prokka/
-# FNA=$(find "$OUTPUT_DIR/genomes" -name "*.fna")
-# parallel -j $THREADS \
-#     prokka \
-#         --cpus 1 \
-#         --prefix {/.} \
-#         --locustag {/.} \
-#         --outdir $OUTPUT_DIR/prokka/{/.} {} \
-#     ::: "${FNA[@]}"
+process prokka {
 
-# FFN=$(find "$OUTPUT_DIR/prokka/" -name "*.ffn")
-# parallel -j $THREADS \
-#     "seqkit split \
-#         -i \
-#         --by-id-prefix '' \
-#         --out-dir $OUTPUT_DIR/seqkit/{/.} {}" \
-#     ::: "${FFN[@]}"
+    input:
+    path genome
 
-# GFF=$(find "$OUTPUT_DIR/prokka" -name "*.gff")
-# roary \
-#     -f $OUTPUT_DIR/roary \
-#     -e \
-#     --mafft \
-#     -p $THREADS \
-#     $GFF
+    output:
+    path "${genome.baseName}/*"
 
-# mkdir $OUTPUT_DIR/temp/
-# PAN_TABLE="$OUTPUT_DIR/temp/PAN_TABLE.temp"
-# sed -i 's/: /\t/g' $OUTPUT_DIR/roary/clustered_proteins
-# awk -F '\t' -v OFS='\t' -v col=1 '{ gsub(/[^[:alnum:]_-]/, "_", $col); print }' $OUTPUT_DIR/roary/clustered_proteins > $PAN_TABLE
-# mkdir $OUTPUT_DIR/per_gene
-# while IFS= read -r line; do
-#     dir=$(awk '{print $1}' <<< "$line")
-#     loci=$(awk '{$1=""; print $0}' <<< "$line")
-#     mkdir $OUTPUT_DIR/per_gene/$dir
-#     for locus in $loci; do
-#         base=$(echo $locus | cut -d "_" -f -2)
-#         cp $OUTPUT_DIR/seqkit/$base/$locus.ffn $OUTPUT_DIR/per_gene/$dir/
-#         done
-# done < $PAN_TABLE
+    """
+    prokka --prefix $genome.baseName --locustag $genome.baseName --outdir $genome.baseName $genome
+    """
+}
 
-# mkdir $OUTPUT_DIR/reports
-# GFF_COUNT=$(echo "$GFF" | wc -l)
-# awk -F'\t' -v max="$GFF_COUNT" '
-# {
-#     seq_count = NF - 1;
-#     ratio = seq_count / max;
-#     printf("%s\t%.2f\n", $1, ratio);
-# }' $PAN_TABLE > $OUTPUT_DIR/reports/presence_report.tsv
-
-# SOURCE=$OUTPUT_DIR/temp/SOURCE.temp
-# mkdir -p $OUTPUT_DIR/source
-# parallel -j $THREADS \
-#     "grep -E '^(chromosome|plasmid)' {} | awk -F'\t' '{for (i=1; i<=NF; i++) {if (\$i ~ /^ID=/) {sub(/^ID=/, \"\", \$i); sub(/;.*\$/, \"\", \$i); print \$1 \"\t\" \$i}}}' > $OUTPUT_DIR/source/\$(basename {} .gff).source" \
-#     ::: "${GFF[@]}"
-# cat $OUTPUT_DIR/source/*.source > $SOURCE
-# sed -i 's/plasmid_[0-9]\+/plasmid/g' $SOURCE
-
-# SOURCE_TABLE=$OUTPUT_DIR/temp/SOURCE_TABLE.temp
-# awk -F'\t' 'NR==FNR { source[$2]=$1; next }
-# {
-#     printf("%s", $1);
-#     for (i=2; i<=NF; i++) {
-#         if ($i in source) printf("\t%s", source[$i]);
-#     }
-#     printf("\n");
-# }' $SOURCE $PAN_TABLE > $SOURCE_TABLE
-# awk 'BEGIN {OFS=FS="\t"} {type=""; count=0; for (i=2; i<=NF; i++) {if ($i == "chromosome") count++; else if ($i == "plasmid") count--;} if (count == NF-1) type="chromosome"; else if (count == 1-NF) type="plasmid"; else type="mixed"; print $1, type}' $SOURCE_TABLE > $OUTPUT_DIR/reports/source_report.tsv
-
-# PER_GENE=$OUTPUT_DIR/temp/PER_GENE.temp
-# find $OUTPUT_DIR/per_gene/ -type f > $PER_GENE
-# parallel -j $THREADS \
-#     "sed -i '1s/.*/>{/.}/' {}; \
-#     truncate -s -4 {}; \
-#     echo >> {}" \
-#     :::: $PER_GENE
-
-# PER_GENE=$OUTPUT_DIR/temp/PER_GENE.temp
-# find $OUTPUT_DIR/per_gene/* -type d > $PER_GENE
-# mkdir $OUTPUT_DIR/multi
-# for dir in $(cat $PER_GENE); do
-#     cat $dir/*.ffn > $OUTPUT_DIR/multi/$(basename $dir).fasta
-#     done
-
-# MULTI=$OUTPUT_DIR/temp/MULTI.temp
-# find $OUTPUT_DIR/multi -type f > $MULTI
-# mkdir $OUTPUT_DIR/rmdup
-# mkdir $OUTPUT_DIR/duplicates
-# parallel -j $THREADS \
-#     "seqkit rmdup \
-#         -s {} \
-#         -D $OUTPUT_DIR/duplicates/{/.}.dup \
-#         > $OUTPUT_DIR/rmdup/{/.}.fasta" \
-#     :::: $MULTI
-
-# FILTERED_MULTI=$OUTPUT_DIR/temp/FILTERED_MULTI.temp
-# for file in $(find $OUTPUT_DIR/rmdup -type f); do
-#     sequence_count=$(grep -c "^>" "$file")
-#     if (( sequence_count >= 3 )); then
-#         echo "$file" >> $FILTERED_MULTI
-#     fi
-# done
-
-# mkdir $OUTPUT_DIR/transeq
-# parallel -j $THREADS \
-#     "transeq \
-#         -sequence {} \
-#         -outseq $OUTPUT_DIR/transeq/{/.}.fasta \
-#         && sed -i '/^>/s/_1$//' $OUTPUT_DIR/transeq/{/.}.fasta" \
-#     :::: $FILTERED_MULTI
-
-# TRANSEQ=$OUTPUT_DIR/temp/TRANSEQ.temp
-# find $OUTPUT_DIR/transeq -type f > $TRANSEQ
-# mkdir $OUTPUT_DIR/msa
-# parallel -j $THREADS \
-#     "mafft \
-#         --auto \
-#         --preservecase \
-#         {} \
-#         > $OUTPUT_DIR/msa/{/.}.msa" \
-#     :::: $TRANSEQ
-
-# MSA=$OUTPUT_DIR/temp/MSA.temp
-# find $OUTPUT_DIR/msa -type f > $MSA
-# mkdir $OUTPUT_DIR/pal2nal
-# parallel -j $THREADS \
-#     "pal2nal.pl -output fasta {} $OUTPUT_DIR/rmdup/{/.}.fasta > $OUTPUT_DIR/pal2nal/{/.}.fasta" \
-#     :::: $MSA
-
-PAL2NAL=$OUTPUT_DIR/temp/PAL2NAL.temp
-# find $OUTPUT_DIR/pal2nal -type f > $PAL2NAL
-# mkdir $OUTPUT_DIR/rapidnj
-# parallel -j $THREADS \
-#     "rapidnj {} \
-#     -i fa \
-#     -x $OUTPUT_DIR/rapidnj/{/.}.tree \
-#     && sed -i 's/'\''//g' $OUTPUT_DIR/rapidnj/{/.}.tree" \
-#     :::: $PAL2NAL
-
-# mkdir $OUTPUT_DIR/meme
-# parallel -j $THREADS \
-#     "hyphy meme \
-#         --alignment {} \
-#         --tree $OUTPUT_DIR/rapidnj/{/.}.tree \
-#         --output $OUTPUT_DIR/meme/{/.}.meme" \
-#     :::: $PAL2NAL
-
-# MEME=$OUTPUT_DIR/temp/MEME.temp
-# find $OUTPUT_DIR/meme -type f > $MEME
-# mkdir $OUTPUT_DIR/meme_reports
-# parallel -j $THREADS \
-#     "python scripts/hyphy_report.py \
-#     -f {} \
-#     -o $OUTPUT_DIR/meme_reports/{/.}.tsv \
-#     -m meme" \
-#     :::: $MEME
-
-# MREPORTS=$OUTPUT_DIR/temp/MREPORTS.temp
-# find $OUTPUT_DIR/meme_reports -type f > $MREPORTS
-# parallel -j $THREADS \
-#     "python scripts/hyphy_extract.py -f {} -g {/.} -m meme >> $OUTPUT_DIR/reports/meme_report.tsv" \
-#     :::: $MREPORTS
-
-# mkdir $OUTPUT_DIR/fel
-# parallel -j $THREADS \
-#         "hyphy fel \
-#             --alignment {} \
-#             --tree $OUTPUT_DIR/rapidnj/{/.}.tree \
-#             --output $OUTPUT_DIR/fel/{/.}.fel" \
-#     :::: $PAL2NAL
-
-# FEL=$OUTPUT_DIR/temp/FEL.temp
-# find $OUTPUT_DIR/fel -type f > $FEL
-# mkdir $OUTPUT_DIR/fel_reports
-# parallel -j $THREADS \
-#     "python scripts/hyphy_report.py \
-#     -f {} \
-#     -o $OUTPUT_DIR/fel_reports/{/.}.tsv \
-#     -m fel" \
-#     :::: $FEL
-
-# FREPORTS=$OUTPUT_DIR/temp/FREPORTS.temp
-# find $OUTPUT_DIR/fel_reports -type f > $FREPORTS
-# parallel -j $THREADS \
-#     "python scripts/hyphy_extract.py -f {} -g {/.} -m fel >> $OUTPUT_DIR/reports/fel_report.tsv" \
-#     :::: $FREPORTS
-
-# mkdir $OUTPUT_DIR/slac
-# parallel -j $THREADS \
-#         "hyphy slac \
-#             --alignment {} \
-#             --tree $OUTPUT_DIR/rapidnj/{/.}.tree \
-#             --output $OUTPUT_DIR/slac/{/.}.slac" \
-#     :::: $PAL2NAL
-
-# SLAC=$OUTPUT_DIR/temp/SLAC.temp
-# find $OUTPUT_DIR/slac -type f > $SLAC
-# mkdir $OUTPUT_DIR/slac_reports
-# parallel -j $THREADS \
-#     "echo {} && \
-#     python scripts/hyphy_report.py \
-#     -f {} \
-#     -o $OUTPUT_DIR/slac_reports/{/.}.tsv \
-#     -m slac" \
-#     :::: $SLAC
-
-# SREPORTS=$OUTPUT_DIR/temp/SREPORTS.temp
-# find $OUTPUT_DIR/slac_reports -type f > $SREPORTS
-# parallel -j $THREADS \
-#     "python scripts/hyphy_extract.py -f {} -g {/.} -m slac >> $OUTPUT_DIR/reports/slac_report.tsv" \
-#     :::: $SREPORTS
-
-# mkdir $OUTPUT_DIR/codeml_ctl
-# parallel -j $THREADS \
-#     "sed 's|stewart\.aa|{}|g; \
-#     s|mlc|$OUTPUT_DIR/codeml/{/.}.cml|g; \
-#     s|stewart\.trees|$OUTPUT_DIR/rapidnj/{/.}.tree|g' \
-#     resources/codeml_default.ctl > $OUTPUT_DIR/codeml_ctl/{/.}.ctl" \
-#     :::: $PAL2NAL
-
-# CTL=$OUTPUT_DIR/temp/CTL.temp
-# find $OUTPUT_DIR/codeml_ctl -type f > $CTL
-# mkdir $OUTPUT_DIR/codeml
-# parallel -j $THREADS "codeml {}" :::: $CTL
-
-# CML=$OUTPUT_DIR/temp/CML.temp
-# find $OUTPUT_DIR/codeml -type f > $CML
-# parallel -j $THREADS "value=\$(grep \"w (dN/dS) for branches:\" {} | awk \"{print \\\$NF}\") && echo -e \"{/.}\t\$value\" >> $OUTPUT_DIR/reports/cml_report.tsv" :::: $CML
-
-# abritamr run -c $OUTPUT_DIR/roary/pan_genome_reference.fa -j $THREADS --prefix $OUTPUT_DIR/abritamr
-# awk -F'\t' 'NR > 1 {gsub(/\(|\)/,"_"); print $6 "\t" $9}' $OUTPUT_DIR/abritamr/amrfinder.out | sort | uniq > $OUTPUT_DIR/reports/abritamr_report.tsv
-
-# mkdir $OUTPUT_DIR/consensus
-# parallel -j $THREADS \
-#     "cons -sequence {} \
-#     -outseq $OUTPUT_DIR/consensus/{/.}.cons \
-#     -name {/.}" \
-#     :::: $PAL2NAL
-
-# mkdir $OUTPUT_DIR/dNdS
-# parallel -j $THREADS \
-#     "python scripts/dNdS.py \
-#     -c data/consensus/{/.}.cons \
-#     -v {} \
-#     -o $OUTPUT_DIR/dNdS/{/.}.tsv" \
-#     :::: $PAL2NAL
-
-# DNDS=$OUTPUT_DIR/temp/DNDS.temp
-# find $OUTPUT_DIR/dNdS -type f > $DNDS
-# parallel -j $THREADS \
-#     "python scripts/dNdS_report.py \
-#     -i {} -g {/.} >> $OUTPUT_DIR/reports/dNdS_report.tsv" \
-#     :::: $DNDS
-
-REPORTS=$(find $OUTPUT_DIR/reports/ -type f -name "*_report.tsv")
-python scripts/report_table.py -f $REPORTS -o $OUTPUT_DIR/reports
+workflow {
+    genomes_ch = prepare_genome(fasta_ch)
+    prokka_ch = prokka(genomes_ch)
+}
