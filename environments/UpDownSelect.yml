@@ -26,3 +26,4 @@ dependencies:
   - pal2nal=14.1
   - ipykernel=6.15.2
   - seaborn=0.12.2
+  - nextflow=22.10.6
