@@ -7,7 +7,7 @@
 //     """
 // }
 
-params.input_dir = "$baseDir/ncbi_dataset"
+params.input_dir = "$baseDir/nf_test"
 fasta_ch = Channel.fromPath("$params.input_dir/data**/*.fna")
 
 process prepare_genome {
@@ -36,7 +36,54 @@ process prokka {
     """
 }
 
+process roary {
+
+    cpus 12
+    input:
+    path gff_list
+
+    output:
+    path "roary/*"
+
+    """
+    roary -f roary -e --mafft -p $task.cpus $gff_list
+    """
+}
+
+process pan_table {
+
+    input:
+    path clustered_proteins
+
+    output:
+    stdout
+
+    """
+    python $baseDir/scripts/pan_table.py -f $clustered_proteins
+    """
+}
+
+process seqkit {
+
+    input:
+    path ffn
+
+    output:
+    path "${ffn.baseName}/*"
+    
+    """
+    seqkit split -i --by-id-prefix '' --out-dir $ffn.baseName $ffn
+    """
+}
+
 workflow {
     genomes_ch = prepare_genome(fasta_ch)
-    prokka_ch = prokka(genomes_ch)
+    prokka_ch = prokka(genomes_ch).flatten()
+    gff_ch = prokka_ch.filter(~/.*.gff/)
+    gff_list = gff_ch.collect()
+    roary_ch = roary(gff_list).flatten()
+    clustered_proteins = roary_ch.filter(~/.*.clustered_proteins/)
+    pan_table = pan_table(clustered_proteins).splitCsv(sep: '\t')
+    ffn_ch = prokka_ch.filter(~/.*.ffn/)
+    seqkit_ch = seqkit(ffn_ch)
 }
