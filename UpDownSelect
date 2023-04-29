@@ -1,89 +1,135 @@
-// process EXAMPLE {
-//     output:
-//     stdout
+#!/bin/bash
+#SBATCH --job-name=UpDownSelect
+#SBATCH --time=5-00:00:00
+#SBATCH --cpus-per-task=200
+#SBATCH --mem-per-cpu=4G
 
-//     """
-//     printf ${params.greeting}
-//     """
-// }
+INPUT_DIR=${1:-ncbi_dataset}
+OUTPUT_DIR=${2:-data}
+THREADS=${3:-12}
+SAMPLE_SIZE=${4:-3}
+TAXON=${5:-"staphylococcus aureus"}
+PTHREADS=$((THREADS / 4))
 
-params.input_dir = "$baseDir/nf_test"
-fasta_ch = Channel.fromPath("$params.input_dir/data**/*.fna")
+GENOMES=$OUTPUT_DIR/temp/GENOMES.temp
+BAKTA=$OUTPUT_DIR/temp/BAKTA.temp
+AMR_SEQS=$OUTPUT_DIR/temp/AMR_SEQS.temp
+RMDUP=$OUTPUT_DIR/temp/RMDUP.temp
+FILTERED_MULTI=$OUTPUT_DIR/temp/FILTERED_MULTI
+TRANSEQ=$OUTPUT_DIR/temp/TRANSEQ
+MSA=$OUTPUT_DIR/temp/MSA
 
-process prepare_genome {
+build_directory_structure() {
+    mkdir -p $OUTPUT_DIR/temp
+    mkdir -p $OUTPUT_DIR/reports
+    mkdir -p $OUTPUT_DIR/bakta
+    mkdir -p $OUTPUT_DIR/amr_seqs
+    mkdir -p $OUTPUT_DIR/rmdup
+    mkdir -p $OUTPUT_DIR/filtered_multi
+    mkdir -p $OUTPUT_DIR/transeq
+    mkdir -p $OUTPUT_DIR/msa
+    mkdir -p $OUTPUT_DIR/pal2nal
+}
+
+fetch_genome_data() {
+    datasets download genome taxon "$TAXON" \
+        --assembly-level complete \
+        --exclude-atypical \
+        --assembly-source 'RefSeq' \
+        --dehydrated \
+        --filename $INPUT_DIR.zip
     
-    input:
-    path fasta
-
-    output:
-    path "*.fna"
-
-    """
-    python $baseDir/scripts/prepare_genome.py -f $fasta
-    """
+    unzip -n $INPUT_DIR.zip
+    rm $INPUT_DIR.zip
+    datasets rehydrate --directory .
 }
 
-process prokka {
-
-    input:
-    path genome
-
-    output:
-    path "${genome.baseName}/*"
-
-    """
-    prokka --prefix $genome.baseName --locustag $genome.baseName --outdir $genome.baseName $genome
-    """
+download_bakta_db() {
+    bakta_db download --output resources --type light
 }
 
-process roary {
-
-    cpus 12
-    input:
-    path gff_list
-
-    output:
-    path "roary/*"
-
-    """
-    roary -f roary -e --mafft -p $task.cpus $gff_list
-    """
+annotate_genomes() {
+    find $INPUT_DIR/data -name "*.fna" | shuf -n $SAMPLE_SIZE > $GENOMES
+    parallel -j $PTHREADS \
+        "bakta \
+            --db resources/db-light/ \
+            --prefix {/.} \
+            --threads 4 \
+            --output $OUTPUT_DIR/bakta/{/.}" {} \
+        :::: $GENOMES
 }
 
-process pan_table {
-
-    input:
-    path clustered_proteins
-
-    output:
-    stdout
-
-    """
-    python $baseDir/scripts/pan_table.py -f $clustered_proteins
-    """
+collect_amr_seqs() {
+    rm -f $OUTPUT_DIR/amr_seqs/*
+    find $OUTPUT_DIR/bakta -name "*.json" > $BAKTA
+    parallel -j $THREADS \
+        "python scripts/collect_amr_seqs.py \
+            -i {} \
+            -d {/.} \
+            -o $OUTPUT_DIR/amr_seqs" \
+        :::: $BAKTA
 }
 
-process seqkit {
-
-    input:
-    path ffn
-
-    output:
-    path "${ffn.baseName}/*"
-    
-    """
-    seqkit split -i --by-id-prefix '' --out-dir $ffn.baseName $ffn
-    """
+remove_stop_codons() {
+    find $OUTPUT_DIR/amr_seqs -type f > $AMR_SEQS
+    parallel -j $THREADS \
+        "python scripts/remove_stop_codons.py -f {}" \
+        :::: $AMR_SEQS
 }
 
-workflow {
-    genomes_ch = prepare_genome(fasta_ch)
-    prokka_ch = prokka(genomes_ch).flatten()
-    gff_ch = prokka_ch.filter(~/.*.gff/)
-    gff_list = gff_ch.collect()
-    roary_ch = roary(gff_list).flatten()
-    clustered_proteins = roary_ch.filter(~/.*.clustered_proteins/)
-    pan_table = pan_table(clustered_proteins).splitCsv(sep: '\t')
-    ffn_ch = prokka_ch.filter(~/.*.ffn/)
-    seqkit_ch = seqkit(ffn_ch)
+remove_duplicates() {
+    find $OUTPUT_DIR/amr_seqs -type f > $AMR_SEQS
+    parallel -j $THREADS \
+        "seqkit rmdup \
+            -s {} \
+            > $OUTPUT_DIR/rmdup/{/.}.fasta" \
+        :::: $AMR_SEQS
 }
+
+filter_lengths() {
+    find $OUTPUT_DIR/rmdup -type f > $RMDUP
+    parallel -j $THREADS \
+        "if [ \$(grep -c '>' {}) -ge 3 ]; then \
+            cp {} $OUTPUT_DIR/filtered_multi; \
+        fi" \
+        :::: $RMDUP
+}
+
+translate_multifastas() {
+    find $OUTPUT_DIR/filtered_multi -name "*.fasta" > $FILTERED_MULTI
+    parallel -j $THREADS \
+        "transeq \
+            -sequence {} \
+            -outseq $OUTPUT_DIR/transeq/{/.}.fasta" \
+        :::: $FILTERED_MULTI
+}
+
+msa() {
+    find $OUTPUT_DIR/transeq -type f > $TRANSEQ
+    parallel -j $THREADS \
+        "mafft \
+            --auto \
+            --preservecase \
+            {} \
+            > $OUTPUT_DIR/msa/{/.}.msa" \
+        :::: $TRANSEQ
+}
+
+pal2nal() {
+    find $OUTPUT_DIR/msa -type f > $MSA
+    parallel -j $THREADS \
+        "pal2nal.pl -output fasta {} $OUTPUT_DIR/filtered_multi/{/.}.fasta > $OUTPUT_DIR/pal2nal/{/.}.fasta" \
+        :::: $MSA
+}
+
+build_directory_structure
+# fetch_genome_data
+# download_bakta_db
+# annotate_genomes
+# collect_amr_seqs
+# remove_stop_codons
+# remove_duplicates
+filter_lengths
+translate_multifastas
+msa
+pal2nal
