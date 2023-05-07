@@ -16,8 +16,9 @@ def main():
         gene = feature.get('expert', {}).get('amrfinder', {}).get('gene')
         if gene:
             gene = gene.replace('/', '_')
+            locus = feature['locus']
             with open(f'{args.outdir}/{gene}.fasta', 'a+') as outfile:
-                print(f'>{args.identifier}', file=outfile)
+                print(f'>{locus}', file=outfile)
                 print(feature['nt'], file=outfile)
 
 if __name__ == '__main__':
