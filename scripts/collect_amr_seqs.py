@@ -18,7 +18,7 @@ def main():
             gene = gene.replace('/', '_')
             locus = feature['locus']
             with open(f'{args.outdir}/{gene}.fasta', 'a+') as outfile:
-                print(f'>{locus}', file=outfile)
+                print(f'>{locus}_amr', file=outfile)
                 print(feature['nt'], file=outfile)
 
 if __name__ == '__main__':

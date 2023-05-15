@@ -11,3 +11,5 @@
     - sampling_date
     - geo_location
     - host
+- Perform pre-arm blast with arm-seq consensus seqeuence
+- Use amr-seq consensus sequence to remove non-ACGT symbols from sequences

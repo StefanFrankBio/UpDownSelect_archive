@@ -60,9 +60,13 @@ build_directory_structure() {
     mkdir -p $OUTPUT_DIR/pre_rmdup
     mkdir -p $OUTPUT_DIR/pre_filtered_multi
     mkdir -p $OUTPUT_DIR/pre_transeq
-    mkdir -p $OUTPUT_DIR/pre_msa
-    mkdir -p $OUTPUT_DIR/pre_pal2nal
-    mkdir -p $OUTPUT_DIR/pre_rapidnj
+    mkdir -p $OUTPUT_DIR/merged_filtered_multi
+    mkdir -p $OUTPUT_DIR/merged_transseq
+    mkdir -p $OUTPUT_DIR/merged_msa
+    mkdir -p $OUTPUT_DIR/merged_pal2nal
+    mkdir -p $OUTPUT_DIR/merged_rapidnj
+    mkdir -p $OUTPUT_DIR/merged_dNdS_per_seq
+    mkdir -p $OUTPUT_DIR/amr_consensus
     }
 
 fetch_genome_data() {
@@ -329,6 +333,48 @@ collect_pre_amr_seqs(){
         :::: $FILTERED_BLAST
     }
 
+merge_multifastas(){
+    local INPUT_DIR=$1
+    local INPUT_DIR2=$2
+    local OUTPUT_DIR=$3
+    find $INPUT_DIR -name "*.fasta" > parallel_input.tmp
+    parallel -j $THREADS \
+        "if [ -e $INPUT_DIR2/{/.}.fasta ]; then \
+            cat {} $INPUT_DIR2/{/.}.fasta > $OUTPUT_DIR/{/.}.fasta; \
+        fi" \
+        :::: parallel_input.tmp
+    rm parallel_input.tmp
+}
+
+dNdS_per_seq() {
+    local INPUT_DIR=$1
+    local OUTPUT_DIR=$2
+    find $INPUT_DIR -name "*.fasta" > parallel_input.tmp
+    parallel -j $THREADS \
+        "python dNdS_Calculator/dNdS.py per_sequence \
+            -i {} \
+            -o $OUTPUT_DIR/{/.}.tsv" \
+        :::: parallel_input.tmp
+    rm parallel_input.tmp
+}
+
+build_amr_consensus() {
+    local INPUT_DIR=$1
+    local OUTPUT_DIR=$2
+    find $INPUT_DIR -name "*.fasta" > parallel_input.tmp    
+    parallel -j $THREADS \
+        "seqkit grep -n -r -p '(.+_amr)_1$' {} > $OUTPUT_DIR/{/.}.fasta" \
+        :::: parallel_input.tmp
+    rm parallel_input.tmp
+    find $OUTPUT_DIR -name "*.fasta" > parallel_input.tmp
+    parallel -j $THREADS \
+        "python dNdS_Calculator/dNdS.py consensus \
+            -i {} \
+            -o $OUTPUT_DIR/{/.}.fasta" \
+        :::: parallel_input.tmp
+    rm parallel_input.tmp
+
+}
 
 
 
@@ -347,9 +393,26 @@ build_directory_structure
 # remove_duplicates $OUTPUT_DIR/amr_seqs $OUTPUT_DIR/rmdup
 # filter_lengths $OUTPUT_DIR/rmdup $OUTPUT_DIR/filtered_multi
 # translate_multifastas $OUTPUT_DIR/filtered_multi $OUTPUT_DIR/transeq
-# msa $OUTPUT_DIR/transeq $OUTPUT_DIR/msa
-# pal2nal $OUTPUT_DIR/msa $OUTPUT_DIR/filtered_multi $OUTPUT_DIR/pal2nal
-# rapidnj $OUTPUT_DIR/pal2nal $OUTPUT_DIR/rapidnj
+# build_blast_database
+# amr_blast
+# filter_blast
+# collect_pre_amr_seqs
+# remove_stop_codons $OUTPUT_DIR/pre_amr_seqs
+# remove_duplicates $OUTPUT_DIR/pre_amr_seqs $OUTPUT_DIR/pre_rmdup
+# filter_lengths $OUTPUT_DIR/pre_rmdup $OUTPUT_DIR/pre_filtered_multi
+# translate_multifastas $OUTPUT_DIR/pre_filtered_multi $OUTPUT_DIR/pre_transeq
+# merge_multifastas $OUTPUT_DIR/filtered_multi $OUTPUT_DIR/pre_filtered_multi $OUTPUT_DIR/merged_filtered_multi
+# merge_multifastas $OUTPUT_DIR/transeq $OUTPUT_DIR/pre_transeq $OUTPUT_DIR/merged_transseq
+# msa $OUTPUT_DIR/merged_transseq $OUTPUT_DIR/merged_msa
+# pal2nal $OUTPUT_DIR/merged_msa $OUTPUT_DIR/merged_filtered_multi $OUTPUT_DIR/merged_pal2nal
+# build_amr_consensus $OUTPUT_DIR/merged_pal2nal $OUTPUT_DIR/amr_consensus
+dNdS_per_seq $OUTPUT_DIR/merged_pal2nal $OUTPUT_DIR/merged_dNdS_per_seq
+
+
+
+
+
+# rapidnj $OUTPUT_DIR/merged_pal2nal $OUTPUT_DIR/merged_rapidnj
 # meme
 # fel
 # slac
@@ -362,16 +425,3 @@ build_directory_structure
 # FEL_per_site
 # SLAC_per_site
 # per_site_report
-# build_blast_database
-# amr_blast
-# filter_blast
-# collect_pre_amr_seqs
-
-
-# remove_stop_codons $OUTPUT_DIR/pre_amr_seqs
-# remove_duplicates $OUTPUT_DIR/pre_amr_seqs $OUTPUT_DIR/pre_rmdup
-# filter_lengths $OUTPUT_DIR/pre_rmdup $OUTPUT_DIR/pre_filtered_multi
-# translate_multifastas $OUTPUT_DIR/pre_filtered_multi $OUTPUT_DIR/pre_transeq
-# msa $OUTPUT_DIR/pre_transeq $OUTPUT_DIR/pre_msa
-# pal2nal $OUTPUT_DIR/pre_msa $OUTPUT_DIR/pre_filtered_multi $OUTPUT_DIR/pre_pal2nal
-# rapidnj $OUTPUT_DIR/pre_pal2nal $OUTPUT_DIR/pre_rapidnj
