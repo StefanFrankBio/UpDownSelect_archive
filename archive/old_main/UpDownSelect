@@ -1,0 +1,413 @@
+#!/bin/bash
+#SBATCH --job-name=UpDownSelect
+#SBATCH --time=5-00:00:00
+#SBATCH --cpus-per-task=200
+#SBATCH --mem-per-cpu=4G
+
+INPUT_DIR=${1:-ncbi_dataset}
+OUTPUT_DIR=${2:-data}
+THREADS=${3:-12}
+SAMPLE_SIZE=${4:-3}
+TAXON=${5:-"staphylococcus aureus"}
+PTHREADS=$((THREADS / 4))
+
+mkdir -p $OUTPUT_DIR/{temp,reports}
+GENOMES=$OUTPUT_DIR/temp/GENOMES.temp
+FNA=$OUTPUT_DIR/temp/FNA.temp
+FFN=$OUTPUT_DIR/temp/FFN.temp
+GFF=$OUTPUT_DIR/temp/GFF.temp
+PAN_TABLE=$OUTPUT_DIR/temp/PAN_TABLE.temp
+SPLIT_PAN_TABLE=$OUTPUT_DIR/temp/SPLIT_PAN_TABLE.temp
+MULTI=$OUTPUT_DIR/temp/MULTI.temp
+RMDUP=$OUTPUT_DIR/temp/RMDUP.temp
+FILTERED_MULTI=$OUTPUT_DIR/temp/FILTERED_MULTI.temp
+TRANSEQ=$OUTPUT_DIR/temp/TRANSEQ.temp
+MSA=$OUTPUT_DIR/temp/MSA.temp
+PAL2NAL=$OUTPUT_DIR/temp/PAL2NAL.temp
+MEME=$OUTPUT_DIR/temp/MEME.temp
+MREPORTS=$OUTPUT_DIR/temp/MREPORTS.temp
+FEL=$OUTPUT_DIR/temp/FEL.temp
+FREPORTS=$OUTPUT_DIR/temp/FREPORTS.temp
+SLAC=$OUTPUT_DIR/temp/SLAC.temp
+SREPORTS=$OUTPUT_DIR/temp/SREPORTS.temp
+CTL=$OUTPUT_DIR/temp/CTL.temp
+CML=$OUTPUT_DIR/temp/CML.temp
+SOURCE_TABLE=$OUTPUT_DIR/temp/SOURCE_TABLE.temp
+METADATA=$OUTPUT_DIR/temp/METADATA.temp
+DNDS_PER_SITE=$OUTPUT_DIR/temp/DNDS_PER_SITE.temp
+
+build_directory_structure() {
+    mkdir -p $OUTPUT_DIR/temp
+    mkdir -p $OUTPUT_DIR/reports
+    mkdir -p $OUTPUT_DIR/genomes
+    mkdir -p $OUTPUT_DIR/prokka
+    mkdir -p $OUTPUT_DIR/multi
+    mkdir -p $OUTPUT_DIR/rmdup
+    mkdir -p $OUTPUT_DIR/duplicates
+    mkdir -p $OUTPUT_DIR/filtered_multi
+    mkdir -p $OUTPUT_DIR/transeq
+    mkdir -p $OUTPUT_DIR/msa
+    mkdir -p $OUTPUT_DIR/pal2nal
+    mkdir -p $OUTPUT_DIR/rapidnj
+    mkdir -p $OUTPUT_DIR/meme
+    mkdir -p $OUTPUT_DIR/meme_reports
+    mkdir -p $OUTPUT_DIR/fel
+    mkdir -p $OUTPUT_DIR/fel_reports
+    mkdir -p $OUTPUT_DIR/slac
+    mkdir -p $OUTPUT_DIR/slac_reports
+    mkdir -p $OUTPUT_DIR/codeml_ctl
+    mkdir -p $OUTPUT_DIR/codeml
+    mkdir -p $OUTPUT_DIR/consensus
+    mkdir -p $OUTPUT_DIR/dNdS_per_seq
+    mkdir -p $OUTPUT_DIR/dNdS_per_site
+    mkdir -p $OUTPUT_DIR/FEL_per_site
+    mkdir -p $OUTPUT_DIR/SLAC_per_site
+}
+
+fetch_genome_data() {
+    datasets download genome taxon "$TAXON" \
+        --assembly-level complete \
+        --exclude-atypical \
+        --assembly-source 'RefSeq' \
+        --dehydrated \
+        --filename $INPUT_DIR.zip
+    
+    unzip -n $INPUT_DIR.zip
+    rm $INPUT_DIR.zip
+    datasets rehydrate --directory .
+}
+
+standardize_fasta_data() {
+    if [ -z $SAMPLE_SIZE ]; then
+        find $INPUT_DIR -name "*.fna" > $GENOMES
+    else
+        find $INPUT_DIR -name "*.fna" | shuf -n $SAMPLE_SIZE > $GENOMES
+    fi
+
+    parallel -j $THREADS \
+        "python scripts/standardize_fasta_data.py -f {} -d $OUTPUT_DIR/genomes/" \
+        :::: $GENOMES
+}
+
+annotate_genomes() {
+    find $OUTPUT_DIR/genomes -name "*.fna" > $FNA
+    parallel -j $PTHREADS \
+        "prokka \
+            --cpus 4 \
+            --prefix {/.} \
+            --locustag {/.} \
+            --outdir $OUTPUT_DIR/prokka/{/.}" {} \
+        :::: $FNA
+}
+
+split_fasta_files() {
+    find $OUTPUT_DIR/prokka/ -name "*.ffn" > $FFN
+    parallel -j $THREADS \
+        "seqkit split \
+            -i \
+            --by-id-prefix '' \
+            --out-dir $OUTPUT_DIR/seqkit/{/.} {}" \
+        :::: $FFN
+}
+
+run_roary() {
+    find $OUTPUT_DIR/prokka -name "*.gff" > $GFF
+    xargs -a $GFF roary \
+        -f $OUTPUT_DIR/roary \
+        -p $THREADS
+}
+
+build_multi_fastas() {
+    rm -rf $OUTPUT_DIR/multi/*
+    parallel -j $THREADS --colsep '\t' \
+        "cat $OUTPUT_DIR/seqkit/{2}/{2}{3}.ffn >> $OUTPUT_DIR/multi/{1}.fasta" \
+        :::: $SPLIT_PAN_TABLE
+}
+
+remove_stop_codons() {
+    find $OUTPUT_DIR/multi -type f > $MULTI
+    parallel -j 12 \
+        "python scripts/remove_stop_codons.py -f {}" \
+        :::: $MULTI
+}
+
+remove_duplicates() {
+    parallel -j $THREADS \
+        "seqkit rmdup \
+            -s {} \
+            -D $OUTPUT_DIR/duplicates/{/.}.dup \
+            > $OUTPUT_DIR/rmdup/{/.}.fasta" \
+        :::: $MULTI
+}
+
+filter_lengths() {
+    find $OUTPUT_DIR/rmdup -name "*.fasta" > $RMDUP
+    parallel -j $THREADS "
+        if [ \$(grep -c '>' {}) -ge 3 ]
+        then
+            cp {} $OUTPUT_DIR/filtered_multi
+        fi
+    " :::: $RMDUP
+}
+
+translate_multifastas() {
+    find $OUTPUT_DIR/filtered_multi -name "*.fasta" > $FILTERED_MULTI
+    parallel -j $THREADS \
+        "transeq \
+            -sequence {} \
+            -outseq $OUTPUT_DIR/transeq/{/.}.fasta \
+            && sed -i '/^>/s/_1$//' $OUTPUT_DIR/transeq/{/.}.fasta" \
+        :::: $FILTERED_MULTI
+}
+
+msa() {
+    find $OUTPUT_DIR/transeq -type f > $TRANSEQ
+    parallel -j $THREADS \
+        "mafft \
+            --auto \
+            --preservecase \
+            {} \
+            > $OUTPUT_DIR/msa/{/.}.msa" \
+        :::: $TRANSEQ
+}
+
+pal2nal() {
+    find $OUTPUT_DIR/msa -type f > $MSA
+    parallel -j $THREADS \
+        "pal2nal.pl -output fasta {} $OUTPUT_DIR/filtered_multi/{/.}.fasta > $OUTPUT_DIR/pal2nal/{/.}.fasta" \
+        :::: $MSA
+}
+
+rapidnj() {
+    find $OUTPUT_DIR/pal2nal -type f > $PAL2NAL
+    parallel -j $PTHREADS \
+        "rapidnj {} \
+        -i fa \
+        -c 4 \
+        -x $OUTPUT_DIR/rapidnj/{/.}.tree \
+        && sed -i 's/'\''//g' $OUTPUT_DIR/rapidnj/{/.}.tree" \
+        :::: $PAL2NAL
+}
+
+meme() {
+    parallel -j $PTHREADS \
+        "hyphy CPU=4 meme \
+            --alignment {} \
+            --tree $OUTPUT_DIR/rapidnj/{/.}.tree \
+            --output $OUTPUT_DIR/meme/{/.}.meme" \
+        :::: $PAL2NAL
+}
+
+meme_reports() {
+    find $OUTPUT_DIR/meme -type f > $MEME
+    parallel -j $THREADS \
+        "python scripts/hyphy_report.py \
+        -f {} \
+        -o $OUTPUT_DIR/meme_reports/{/.}.tsv \
+        -m meme" \
+        :::: $MEME
+}
+
+meme_report_table() {
+    > $OUTPUT_DIR/reports/meme_report.tsv
+    find $OUTPUT_DIR/meme_reports -type f > $MREPORTS
+    parallel -j $THREADS \
+        "python scripts/hyphy_extract.py -f {} -g {/.} -m meme >> $OUTPUT_DIR/reports/meme_report.tsv" \
+        :::: $MREPORTS
+}
+
+fel() {
+    parallel -j $PTHREADS \
+            "hyphy CPU=4 fel \
+                --alignment {} \
+                --tree $OUTPUT_DIR/rapidnj/{/.}.tree \
+                --output $OUTPUT_DIR/fel/{/.}.fel" \
+        :::: $PAL2NAL
+}
+
+fel_reports() {
+    find $OUTPUT_DIR/fel -type f > $FEL
+    parallel -j $THREADS \
+        "python scripts/hyphy_report.py \
+        -f {} \
+        -o $OUTPUT_DIR/fel_reports/{/.}.tsv \
+        -m fel" \
+        :::: $FEL
+}
+
+fel_report_table() {
+    > $OUTPUT_DIR/reports/fel_report.tsv
+    find $OUTPUT_DIR/fel_reports -type f > $FREPORTS
+    parallel -j $THREADS \
+        "python scripts/hyphy_extract.py -f {} -g {/.} -m fel >> $OUTPUT_DIR/reports/fel_report.tsv" \
+        :::: $FREPORTS
+}
+
+slac() {
+    parallel -j $PTHREADS \
+            "hyphy CPU=4 slac \
+                --alignment {} \
+                --tree $OUTPUT_DIR/rapidnj/{/.}.tree \
+                --output $OUTPUT_DIR/slac/{/.}.slac" \
+        :::: $PAL2NAL
+}
+
+slac_reports() {
+    find $OUTPUT_DIR/slac -type f > $SLAC
+    parallel -j $THREADS \
+        "python scripts/hyphy_report.py \
+        -f {} \
+        -o $OUTPUT_DIR/slac_reports/{/.}.tsv \
+        -m slac" \
+        :::: $SLAC
+}
+
+slac_report_table() {
+    > $OUTPUT_DIR/reports/slac_report.tsv
+    find $OUTPUT_DIR/slac_reports -type f > $SREPORTS
+    parallel -j $THREADS \
+        "python scripts/hyphy_extract.py -f {} -g {/.} -m slac >> $OUTPUT_DIR/reports/slac_report.tsv" \
+        :::: $SREPORTS
+}
+
+codeml_ctl() {
+    parallel -j $THREADS \
+        "sed 's|stewart\.aa|{}|g; \
+        s|mlc|$OUTPUT_DIR/codeml/{/.}.cml|g; \
+        s|stewart\.trees|$OUTPUT_DIR/rapidnj/{/.}.tree|g' \
+        resources/codeml_default.ctl > $OUTPUT_DIR/codeml_ctl/{/.}.ctl" \
+        :::: $PAL2NAL
+}
+
+codeml() {
+    find $OUTPUT_DIR/codeml_ctl -type f > $CTL
+    parallel -j $THREADS "codeml {}" :::: $CTL
+}
+
+codeml_report_table() {
+    > $OUTPUT_DIR/reports/cml_report.tsv
+    find $OUTPUT_DIR/codeml -type f > $CML
+    parallel -j $THREADS "value=\$(grep \"w (dN/dS) for branches:\" {} | awk \"{print \\\$NF}\") && echo -e \"{/.}\t\$value\" >> $OUTPUT_DIR/reports/cml_report.tsv" :::: $CML
+}
+
+consensus() {
+    parallel -j $THREADS \
+        "cons -sequence {} \
+        -outseq $OUTPUT_DIR/consensus/{/.}.cons \
+        -name {/.}" \
+        :::: $PAL2NAL
+}
+
+dNdS_per_seq() {
+    parallel -j $THREADS \
+        "python dNdS_Calculator/dNdS.py per_sequence \
+        -i {} \
+        -o $OUTPUT_DIR/dNdS_per_seq/{/.}.tsv" \
+        :::: $PAL2NAL
+}
+
+dNdS_report_table() {
+    > $OUTPUT_DIR/reports/dNdS_report.tsv
+    find $OUTPUT_DIR/dNdS_per_seq -type f > $DNDS_SEQS
+    parallel -j $THREADS \
+        "python scripts/dNdS_report.py \
+            -i {} -g {/.} >> $OUTPUT_DIR/reports/dNdS_report.tsv" \
+        :::: $DNDS_SEQS
+}
+
+source_table() {
+    > $SOURCE_TABLE
+    parallel -j 1 \
+        "python scripts/extract_source.py -f {} >> $SOURCE_TABLE" \
+        :::: $GFF
+}
+
+find_AMR() {
+    cat $OUTPUT_DIR/consensus/* > $CONSENSUS
+    abritamr run -c $CONSENSUS -j $THREADS --prefix $OUTPUT_DIR/abritamr
+    awk -F'\t' 'NR > 1 {gsub(/\(|\)/,"_"); print $6 "\t" $9}' $OUTPUT_DIR/abritamr/amrfinder.out | sort | uniq > $OUTPUT_DIR/reports/abritamr_report.tsv
+}
+
+report_table() {
+    REPORTS=$(find $OUTPUT_DIR/reports/ -type f -name "*_report.tsv")
+    python scripts/report_table.py -f $REPORTS -o $OUTPUT_DIR/reports
+}
+
+cleanup() {
+    rm 2NG.dN 2NG.dS 2NG.t lnf rst rst1 rub abritamr.log
+}
+
+dNdS_per_site() {
+    parallel -j $THREADS \
+        "python dNdS_Calculator/dNdS.py per_site \
+        -i {} \
+        -o $OUTPUT_DIR/dNdS_per_site/{/.}.tsv" \
+        :::: $PAL2NAL
+}
+
+FEL_per_site() {
+    parallel -j $THREADS \
+        "python scripts/FEL_per_site.py \
+        -i {} \
+        -o $OUTPUT_DIR/FEL_per_site/{/.}.tsv" \
+        :::: $FREPORTS
+}
+
+SLAC_per_site() {
+    parallel -j $THREADS \
+        "python scripts/SLAC_per_site.py \
+        -i {} \
+        -o $OUTPUT_DIR/SLAC_per_site/{/.}.tsv" \
+        :::: $SREPORTS
+}
+
+per_site_report() {
+    parallel -j $THREADS \
+        "python scripts/per_site_report.py \
+        -d {} \
+        -f $OUTPUT_DIR/FEL_per_site/{/.}.tsv \
+        -s $OUTPUT_DIR/SLAC_per_site/{/.}.tsv \
+        -o $OUTPUT_DIR/SLAC_per_site/{/.}.tsv" \
+        :::: $DNDS_PER_SITE
+}
+
+build_directory_structure
+fetch_genome_data
+standardize_fasta_data
+annotate_genomes
+split_fasta_files
+run_roary
+python scripts/pan_table.py -f $OUTPUT_DIR/roary/clustered_proteins -o $PAN_TABLE
+python scripts/presence_report.py -f $PAN_TABLE -c $(cat $GFF | wc -l) -o $OUTPUT_DIR/reports/presence_report.tsv
+python scripts/split_pan_table.py -f $PAN_TABLE -o $SPLIT_PAN_TABLE
+build_multi_fastas
+remove_stop_codons
+remove_duplicates
+filter_lengths
+translate_multifastas
+msa
+pal2nal
+rapidnj
+meme
+meme_reports
+meme_report_table
+fel
+fel_reports
+fel_report_table
+slac
+slac_reports
+slac_report_table
+codeml_ctl
+codeml
+codeml_report_table
+find $OUTPUT_DIR/pal2nal -type f > $PAL2NAL
+dNdS_per_seq
+dNdS_report_table
+source_table
+python scripts/source_report.py -p $PAN_TABLE -s $SOURCE_TABLE -o $OUTPUT_DIR/reports/source_report.tsv
+report_table
+cleanup
+python scripts/metadata.py -i $INPUT_DIR/data/assembly_data_report.jsonl -o $METADATA
+dNdS_per_site
+FEL_per_site
+SLAC_per_site
