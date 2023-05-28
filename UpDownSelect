@@ -6,140 +6,108 @@
 
 INPUT_DIR=${1:-ncbi_dataset}
 OUTPUT_DIR=${2:-data}
-THREADS=${3:-12}
+THREADS=${3:-8}
 SAMPLE_SIZE=${4:-3}
 TAXON=${5:-"staphylococcus aureus"}
 PTHREADS=$((THREADS / 4))
 
-GENOMES=$OUTPUT_DIR/temp/GENOMES.temp
-BAKTA=$OUTPUT_DIR/temp/BAKTA.temp
-AMR_SEQS=$OUTPUT_DIR/temp/AMR_SEQS.temp
-RMDUP=$OUTPUT_DIR/temp/RMDUP.temp
-FILTERED_MULTI=$OUTPUT_DIR/temp/FILTERED_MULTI.temp
-TRANSEQ=$OUTPUT_DIR/temp/TRANSEQ.temp
-MSA=$OUTPUT_DIR/temp/MSA.temp
-PAL2NAL=$OUTPUT_DIR/temp/PAL2NAL.temp
-CTL=$OUTPUT_DIR/temp/CTL.temp
-FEL=$OUTPUT_DIR/temp/FEL.temp
-FREPORTS=$OUTPUT_DIR/temp/FREPORTS.temp
-SLAC=$OUTPUT_DIR/temp/SLAC.temp
-SREPORTS=$OUTPUT_DIR/temp/SREPORTS.temp
-DNDS_PER_SITE=$OUTPUT_DIR/temp/DNDS_PER_SITE.temp
-PER_SITE_REPORTS=$OUTPUT_DIR/temp/PER_SITE_REPORTS.temp
-FFN=$OUTPUT_DIR/temp/FFN.temp
-AMR_BLAST=$OUTPUT_DIR/temp/AMR_BLAST.temp
-FILTERED_BLAST=$OUTPUT_DIR/temp/FILTERED_BLAST.temp
-
 build_directory_structure() {
-    mkdir -p $OUTPUT_DIR/temp
-    mkdir -p $OUTPUT_DIR/reports
-    mkdir -p $OUTPUT_DIR/bakta
-    mkdir -p $OUTPUT_DIR/amr_seqs
-    mkdir -p $OUTPUT_DIR/rmdup
-    mkdir -p $OUTPUT_DIR/filtered_multi
+    mkdir -p $OUTPUT_DIR/orfs
+    mkdir -p $OUTPUT_DIR/blastdb
+    mkdir -p $OUTPUT_DIR/references/{dna,protein}
+    mkdir -p $OUTPUT_DIR/amr_blast
+    mkdir -p $OUTPUT_DIR/filtered_ids
+    mkdir -p $OUTPUT_DIR/multi
     mkdir -p $OUTPUT_DIR/transeq
     mkdir -p $OUTPUT_DIR/msa
     mkdir -p $OUTPUT_DIR/pal2nal
-    mkdir -p $OUTPUT_DIR/rapidnj
-    mkdir -p $OUTPUT_DIR/meme
-    mkdir -p $OUTPUT_DIR/fel
-    mkdir -p $OUTPUT_DIR/fel_reports
-    mkdir -p $OUTPUT_DIR/slac
-    mkdir -p $OUTPUT_DIR/slac_reports
-    mkdir -p $OUTPUT_DIR/codeml_ctl
-    mkdir -p $OUTPUT_DIR/codeml
-    mkdir -p $OUTPUT_DIR/dNdS_per_site
-    mkdir -p $OUTPUT_DIR/FEL_per_site
-    mkdir -p $OUTPUT_DIR/SLAC_per_site
-    mkdir -p $OUTPUT_DIR/per_site_reports
-    mkdir -p $OUTPUT_DIR/per_site_visualization
-    mkdir -p $OUTPUT_DIR/blast_db
-    mkdir -p $OUTPUT_DIR/amr_blast
-    mkdir -p $OUTPUT_DIR/filtered_blast
-    mkdir -p $OUTPUT_DIR/pre_amr_seqs
-    mkdir -p $OUTPUT_DIR/pre_rmdup
-    mkdir -p $OUTPUT_DIR/pre_filtered_multi
-    mkdir -p $OUTPUT_DIR/pre_transeq
-    mkdir -p $OUTPUT_DIR/merged_filtered_multi
-    mkdir -p $OUTPUT_DIR/merged_transseq
-    mkdir -p $OUTPUT_DIR/merged_msa
-    mkdir -p $OUTPUT_DIR/merged_pal2nal
-    mkdir -p $OUTPUT_DIR/merged_rapidnj
-    mkdir -p $OUTPUT_DIR/merged_dNdS_per_seq
-    mkdir -p $OUTPUT_DIR/amr_consensus
     }
 
 fetch_genome_data() {
+    local INPUT_DIR=$1
+    local TAXON=$2
     datasets download genome taxon "$TAXON" \
         --assembly-level complete \
         --exclude-atypical \
         --assembly-source 'RefSeq' \
         --dehydrated \
         --filename $INPUT_DIR.zip
-    
     unzip -n $INPUT_DIR.zip
     rm $INPUT_DIR.zip
     datasets rehydrate --directory .
     }
 
-download_bakta_db() {
-    bakta_db download --output resources --type light
-    }
-
-annotate_genomes() {
-    find $INPUT_DIR/data -name "*.fna" | shuf -n $SAMPLE_SIZE > $GENOMES
-    parallel -j $PTHREADS \
-        "bakta \
-            --db resources/db-light/ \
-            --prefix {/.} \
-            --threads 4 \
-            --output $OUTPUT_DIR/bakta/{/.}" {} \
-        :::: $GENOMES
-    }
-
-collect_amr_seqs() {
-    rm -f $OUTPUT_DIR/amr_seqs/*
-    find $OUTPUT_DIR/bakta -name "*.json" > $BAKTA
+extract_orfs() {
+    local INPUT_DIR=$1
+    local OUTPUT_DIR=$2
+    find $INPUT_DIR -name "*.fna" > parallel_input.tmp
     parallel -j $THREADS \
-        "python scripts/collect_amr_seqs.py \
-            -i {} \
+        "python scripts/extract_orfs.py -i {} \
             -d {/.} \
-            -o $OUTPUT_DIR/amr_seqs" \
-        :::: $BAKTA
-    }
-
-remove_stop_codons() {
-    local INPUT_DIR=$1
-    find $INPUT_DIR -type f > parallel_input.tmp
-    parallel -j "$THREADS" \
-        "python scripts/remove_stop_codons.py -f {}" \
+            -o $OUTPUT_DIR/{/.}.fasta" \
         :::: parallel_input.tmp
     rm parallel_input.tmp
     }
 
-remove_duplicates() {
+build_blast_database() {
+    local INPUT_DIR=$1
+    local OUTPUT_DIR=$2
+    find $INPUT_DIR -name "*.fasta" -exec cat {} + > $OUTPUT_DIR/combined.fasta
+    makeblastdb -in $OUTPUT_DIR/combined.fasta -dbtype nucl -out $OUTPUT_DIR/full_db
+    }
+
+split_amr_db() {
+    local FASTA=$1
+    local OUTPUT_DIR=$2
+    seqkit split -i --by-id-prefix '' --out-dir $OUTPUT_DIR/dna $FASTA
+    }
+
+amr_blast() {
+    local INPUT_DIR=$1
+    local BLASTDB=$2
+    local OUTPUT_DIR=$3
+    find $INPUT_DIR -type f > parallel_input.tmp
+    parallel -j 1 \
+        "tblastn -query {} \
+            -db $BLASTDB \
+            -max_target_seqs 10000 \
+            -num_threads=$THREADS \
+            -out $OUTPUT_DIR/{/.}.tsv \
+            -outfmt '6 sseqid qlen length pident'" \
+        :::: parallel_input.tmp
+    rm parallel_input.tmp
+    }
+
+filter_blast() {
     local INPUT_DIR=$1
     local OUTPUT_DIR=$2
     find $INPUT_DIR -type f > parallel_input.tmp
     parallel -j $THREADS \
-        "seqkit rmdup \
-            -s {} \
-            > $OUTPUT_DIR/{/.}.fasta" \
+        "python scripts/filter_blast.py -i {} \
+        -o $OUTPUT_DIR/{/.}.out" \
         :::: parallel_input.tmp
-    rm parallel_input.tmp
-    }
+    rm parallel_input.tmp   
+}
 
-
-filter_lengths() {
+collect_amr_seqs(){
     local INPUT_DIR=$1
-    local OUTPUT_DIR=$2
+    local ALL_SEQS=$2
+    local OUTPUT_DIR=$3
     find $INPUT_DIR -type f > parallel_input.tmp
     parallel -j $THREADS \
-        "if [ \$(grep -c '>' {}) -ge 3 ]; then \
-            cp {} $OUTPUT_DIR; \
-        fi" \
+        "seqkit grep -n -f {} $ALL_SEQS > $OUTPUT_DIR/{/.}.fasta" \
         :::: parallel_input.tmp
-    rm parallel_input.tmp
+    rm parallel_input.tmp 
+    }
+
+sort_amr_seqs(){
+    local INPUT_DIR=$1
+    local INPUT_DIR2=$2
+    find $INPUT_DIR -type f > parallel_input.tmp
+    parallel -j $THREADS \
+        "python scripts/sort_amr_seqs.py -i {} -o $INPUT_DIR2/{/.}.out" \
+        :::: parallel_input.tmp
+    rm parallel_input.tmp 
     }
 
 translate_multifastas() {
@@ -179,249 +147,18 @@ pal2nal() {
     rm parallel_input.tmp
     }
 
-rapidnj() {
-    local INPUT_DIR=$1
-    local OUTPUT_DIR=$2
-    find $INPUT_DIR -name "*.fasta" > parallel_input.tmp
-    parallel -j $PTHREADS \
-        "rapidnj {} \
-        -i fa \
-        -c 4 \
-        -x $OUTPUT_DIR/{/.}.tree \
-        && sed -i 's/'\''//g' $OUTPUT_DIR/{/.}.tree" \
-        :::: parallel_input.tmp
-    rm parallel_input.tmp
-    }
-
-meme() {
-    find $OUTPUT_DIR/pal2nal -type f > $PAL2NAL
-    parallel -j $PTHREADS \
-        "hyphy CPU=4 meme \
-            --alignment {} \
-            --tree $OUTPUT_DIR/rapidnj/{/.}.tree \
-            --output $OUTPUT_DIR/meme/{/.}.meme" \
-        :::: $PAL2NAL
-    }
-
-
-fel() {
-    parallel -j $PTHREADS \
-            "hyphy CPU=4 fel \
-                --alignment {} \
-                --tree $OUTPUT_DIR/rapidnj/{/.}.tree \
-                --output $OUTPUT_DIR/fel/{/.}.fel" \
-        :::: $PAL2NAL
-    }
-
-fel_reports() {
-    find $OUTPUT_DIR/fel -type f > $FEL
-    parallel -j $THREADS \
-        "python scripts/hyphy_report.py \
-        -f {} \
-        -o $OUTPUT_DIR/fel_reports/{/.}.tsv \
-        -m fel" \
-        :::: $FEL
-    }
-
-slac() {
-    parallel -j $PTHREADS \
-            "hyphy CPU=4 slac \
-                --alignment {} \
-                --tree $OUTPUT_DIR/rapidnj/{/.}.tree \
-                --output $OUTPUT_DIR/slac/{/.}.slac" \
-        :::: $PAL2NAL
-    }
-
-slac_reports() {
-    find $OUTPUT_DIR/slac -type f > $SLAC
-    parallel -j $THREADS \
-        "python scripts/hyphy_report.py \
-        -f {} \
-        -o $OUTPUT_DIR/slac_reports/{/.}.tsv \
-        -m slac" \
-        :::: $SLAC
-    }
-
-codeml_ctl() {
-    parallel -j $THREADS \
-        'sed "s|stewart\.aa|{}|g; \
-        s|mlc|'"$OUTPUT_DIR"'/codeml/{/.}.cml|g; \
-        s|stewart\.trees|'"$OUTPUT_DIR"'/rapidnj/{/.}.tree|g" \
-        resources/codeml_default.ctl > '"$OUTPUT_DIR"'/codeml_ctl/{/.}.ctl' \
-        :::: $PAL2NAL
-    }
-
-codeml() {
-    find $OUTPUT_DIR/codeml_ctl -type f > $CTL
-    parallel -j $THREADS "codeml {}" :::: $CTL
-    }
-
-clone_dNdS_Calculator() {
-    git clone https://github.com/StefanFrankBio/dNdS_Calculator.git
-    }
-
-dNdS_per_site() {
-    find $OUTPUT_DIR/pal2nal -type f > $PAL2NAL
-    parallel -j $THREADS \
-        "python dNdS_Calculator/dNdS.py per_site \
-        -i {} \
-        -o $OUTPUT_DIR/dNdS_per_site/{/.}.tsv" \
-        :::: $PAL2NAL
-    }
-
-FEL_per_site() {
-    find $OUTPUT_DIR/fel_reports -type f > $FREPORTS
-    parallel -j $THREADS \
-        "python scripts/FEL_per_site.py \
-        -i {} \
-        -o $OUTPUT_DIR/FEL_per_site/{/.}.tsv" \
-        :::: $FREPORTS
-    }
-
-SLAC_per_site() {
-    find $OUTPUT_DIR/slac_reports -type f > $SREPORTS
-    parallel -j $THREADS \
-        "python scripts/SLAC_per_site.py \
-        -i {} \
-        -o $OUTPUT_DIR/SLAC_per_site/{/.}.tsv" \
-        :::: $SREPORTS
-    }
-
-per_site_report() {
-    find $OUTPUT_DIR/dNdS_per_site -type f > $DNDS_PER_SITE
-    parallel -j $THREADS \
-        "python scripts/per_site_report.py \
-            -d {} \
-            -f $OUTPUT_DIR/FEL_per_site/{/.}.tsv \
-            -s $OUTPUT_DIR/SLAC_per_site/{/.}.tsv \
-            -o $OUTPUT_DIR/per_site_reports/{/.}.tsv" \
-        :::: $DNDS_PER_SITE
-    }
-
-build_blast_database() {
-    find $OUTPUT_DIR/bakta -type f -name "*.ffn" -exec cat {} + > $OUTPUT_DIR/temp/temp
-    seqkit replace -p "(.+?)\s.*" -r "\${1}" $OUTPUT_DIR/temp/temp > $FFN 
-    rm $OUTPUT_DIR/temp/temp
-    makeblastdb -in $FFN -dbtype nucl -out $OUTPUT_DIR/blast_db/full_db
-    }
-
-amr_blast() {
-    find $OUTPUT_DIR/transeq -type f > $TRANSEQ
-    parallel -j 1 \
-        "tblastn -query {} \
-            -db $OUTPUT_DIR/blast_db/full_db \
-            -num_threads=$THREADS -out $OUTPUT_DIR/amr_blast/{/.}.tsv \
-            -outfmt '6 sseqid qlen length'" \
-        :::: $TRANSEQ
-    }
-
-filter_blast() {
-    find $OUTPUT_DIR/amr_blast -type f > $AMR_BLAST
-    parallel -j $THREADS \
-        "python scripts/filter_blast.py \
-            -i {} \
-            -l 0.7 \
-            -a $OUTPUT_DIR/amr_seqs/{/.}.fasta \
-            -o $OUTPUT_DIR/filtered_blast/{/.}.out" \
-        :::: $AMR_BLAST
-    }
-
-collect_pre_amr_seqs(){
-    find $OUTPUT_DIR/filtered_blast -type f > $FILTERED_BLAST
-    parallel -j $THREADS \
-        "seqkit grep -n -f {} $FFN > $OUTPUT_DIR/pre_amr_seqs/{/.}.fasta" \
-        :::: $FILTERED_BLAST
-    }
-
-merge_multifastas(){
-    local INPUT_DIR=$1
-    local INPUT_DIR2=$2
-    local OUTPUT_DIR=$3
-    find $INPUT_DIR -name "*.fasta" > parallel_input.tmp
-    parallel -j $THREADS \
-        "if [ -e $INPUT_DIR2/{/.}.fasta ]; then \
-            cat {} $INPUT_DIR2/{/.}.fasta > $OUTPUT_DIR/{/.}.fasta; \
-        fi" \
-        :::: parallel_input.tmp
-    rm parallel_input.tmp
-}
-
-dNdS_per_seq() {
-    local INPUT_DIR=$1
-    local OUTPUT_DIR=$2
-    find $INPUT_DIR -name "*.fasta" > parallel_input.tmp
-    parallel -j $THREADS \
-        "python dNdS_Calculator/dNdS.py per_sequence \
-            -i {} \
-            -o $OUTPUT_DIR/{/.}.tsv" \
-        :::: parallel_input.tmp
-    rm parallel_input.tmp
-}
-
-build_amr_consensus() {
-    local INPUT_DIR=$1
-    local OUTPUT_DIR=$2
-    find $INPUT_DIR -name "*.fasta" > parallel_input.tmp    
-    parallel -j $THREADS \
-        "seqkit grep -n -r -p '(.+_amr)_1$' {} > $OUTPUT_DIR/{/.}.fasta" \
-        :::: parallel_input.tmp
-    rm parallel_input.tmp
-    find $OUTPUT_DIR -name "*.fasta" > parallel_input.tmp
-    parallel -j $THREADS \
-        "python dNdS_Calculator/dNdS.py consensus \
-            -i {} \
-            -o $OUTPUT_DIR/{/.}.fasta" \
-        :::: parallel_input.tmp
-    rm parallel_input.tmp
-
-}
-
-
-
-
-
-
-
-
+### FUNCTION CALLS ###
 
 build_directory_structure
-# fetch_genome_data
-# download_bakta_db
-# annotate_genomes
-# collect_amr_seqs
-# remove_stop_codons $OUTPUT_DIR/amr_seqs
-# remove_duplicates $OUTPUT_DIR/amr_seqs $OUTPUT_DIR/rmdup
-# filter_lengths $OUTPUT_DIR/rmdup $OUTPUT_DIR/filtered_multi
-# translate_multifastas $OUTPUT_DIR/filtered_multi $OUTPUT_DIR/transeq
-# build_blast_database
-# amr_blast
-# filter_blast
-# collect_pre_amr_seqs
-# remove_stop_codons $OUTPUT_DIR/pre_amr_seqs
-# remove_duplicates $OUTPUT_DIR/pre_amr_seqs $OUTPUT_DIR/pre_rmdup
-# filter_lengths $OUTPUT_DIR/pre_rmdup $OUTPUT_DIR/pre_filtered_multi
-# translate_multifastas $OUTPUT_DIR/pre_filtered_multi $OUTPUT_DIR/pre_transeq
-# merge_multifastas $OUTPUT_DIR/filtered_multi $OUTPUT_DIR/pre_filtered_multi $OUTPUT_DIR/merged_filtered_multi
-# merge_multifastas $OUTPUT_DIR/transeq $OUTPUT_DIR/pre_transeq $OUTPUT_DIR/merged_transseq
-# msa $OUTPUT_DIR/merged_transseq $OUTPUT_DIR/merged_msa
-# pal2nal $OUTPUT_DIR/merged_msa $OUTPUT_DIR/merged_filtered_multi $OUTPUT_DIR/merged_pal2nal
-# build_amr_consensus $OUTPUT_DIR/merged_pal2nal $OUTPUT_DIR/amr_consensus
-dNdS_per_seq $OUTPUT_DIR/merged_pal2nal $OUTPUT_DIR/merged_dNdS_per_seq
-
-
-
-
-
-# rapidnj $OUTPUT_DIR/merged_pal2nal $OUTPUT_DIR/merged_rapidnj
-# meme
-# fel
-# slac
-# slac_reports
-# codeml_ctl
-# codeml
-# clone_dNdS_Calculator
-# dNdS_per_site
-# fel_reports
-# FEL_per_site
-# SLAC_per_site
-# per_site_report
+# fetch_genome_data $INPUT_DIR "$TAXON"
+# extract_orfs $INPUT_DIR/data $OUTPUT_DIR/orfs
+# build_blast_database $OUTPUT_DIR/orfs $OUTPUT_DIR/blastdb
+# split_amr_db resources/amr_db.fasta data/references
+translate_multifastas $OUTPUT_DIR/references/dna $OUTPUT_DIR/references/protein
+amr_blast $OUTPUT_DIR/references/protein $OUTPUT_DIR/blastdb/full_db $OUTPUT_DIR/amr_blast
+filter_blast $OUTPUT_DIR/amr_blast $OUTPUT_DIR/filtered_ids
+collect_amr_seqs $OUTPUT_DIR/filtered_ids data/blastdb/combined.fasta $OUTPUT_DIR/multi
+sort_amr_seqs $OUTPUT_DIR/multi $OUTPUT_DIR/filtered_ids
+translate_multifastas $OUTPUT_DIR/multi $OUTPUT_DIR/transeq
+msa $OUTPUT_DIR/transeq $OUTPUT_DIR/msa
+pal2nal $OUTPUT_DIR/msa $OUTPUT_DIR/multi $OUTPUT_DIR/pal2nal
