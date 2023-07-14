@@ -4,7 +4,8 @@ from Bio import SeqIO
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--infile")
-    parser.add_argument("-o", "--order")
+    parser.add_argument("-o", "--outfile")
+    parser.add_argument("-r", "--order")
     return parser.parse_args()
 
 def main():
@@ -15,7 +16,7 @@ def main():
     with open(args.order, 'r') as order_file:
         sequence_order = [line.strip() for line in order_file]
 
-    with open(args.infile, 'w') as output_fasta:
+    with open(args.outfile, 'w') as output_fasta:
         for header in sequence_order:
             SeqIO.write(record_dict[header], output_fasta, 'fasta')
 

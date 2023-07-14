@@ -6,22 +6,8 @@
 
 INPUT_DIR=${1:-ncbi_dataset}
 OUTPUT_DIR=${2:-data}
-THREADS=${3:-8}
-SAMPLE_SIZE=${4:-3}
-TAXON=${5:-"staphylococcus aureus"}
-PTHREADS=$((THREADS / 4))
-
-build_directory_structure() {
-    mkdir -p $OUTPUT_DIR/orfs
-    mkdir -p $OUTPUT_DIR/blastdb
-    mkdir -p $OUTPUT_DIR/references/{dna,protein}
-    mkdir -p $OUTPUT_DIR/amr_blast
-    mkdir -p $OUTPUT_DIR/filtered_ids
-    mkdir -p $OUTPUT_DIR/multi
-    mkdir -p $OUTPUT_DIR/transeq
-    mkdir -p $OUTPUT_DIR/msa
-    mkdir -p $OUTPUT_DIR/pal2nal
-    }
+THREADS=${3:-12}
+TAXON=${4:-"staphylococcus aureus"}
 
 fetch_genome_data() {
     local INPUT_DIR=$1
@@ -40,6 +26,8 @@ fetch_genome_data() {
 extract_orfs() {
     local INPUT_DIR=$1
     local OUTPUT_DIR=$2
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
     find $INPUT_DIR -name "*.fna" > parallel_input.tmp
     parallel -j $THREADS \
         "python scripts/extract_orfs.py -i {} \
@@ -52,6 +40,8 @@ extract_orfs() {
 build_blast_database() {
     local INPUT_DIR=$1
     local OUTPUT_DIR=$2
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
     find $INPUT_DIR -name "*.fasta" -exec cat {} + > $OUTPUT_DIR/combined.fasta
     makeblastdb -in $OUTPUT_DIR/combined.fasta -dbtype nucl -out $OUTPUT_DIR/full_db
     }
@@ -59,13 +49,31 @@ build_blast_database() {
 split_amr_db() {
     local FASTA=$1
     local OUTPUT_DIR=$2
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
     seqkit split -i --by-id-prefix '' --out-dir $OUTPUT_DIR/dna $FASTA
+    }
+
+translate_fasta() {
+    local INPUT_DIR=$1
+    local OUTPUT_DIR=$2
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
+    find $INPUT_DIR -name "*.fasta" > parallel_input.tmp
+    parallel -j $THREADS \
+        "transeq \
+            -sequence {} \
+            -outseq $OUTPUT_DIR/{/.}.fasta" \
+        :::: parallel_input.tmp
+    rm parallel_input.tmp
     }
 
 amr_blast() {
     local INPUT_DIR=$1
     local BLASTDB=$2
     local OUTPUT_DIR=$3
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
     find $INPUT_DIR -type f > parallel_input.tmp
     parallel -j 1 \
         "tblastn -query {} \
@@ -76,23 +84,29 @@ amr_blast() {
             -outfmt '6 sseqid qlen length pident'" \
         :::: parallel_input.tmp
     rm parallel_input.tmp
+    find $OUTPUT_DIR -type f -empty -delete
     }
 
 filter_blast() {
     local INPUT_DIR=$1
     local OUTPUT_DIR=$2
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
     find $INPUT_DIR -type f > parallel_input.tmp
     parallel -j $THREADS \
         "python scripts/filter_blast.py -i {} \
         -o $OUTPUT_DIR/{/.}.out" \
         :::: parallel_input.tmp
-    rm parallel_input.tmp   
+    rm parallel_input.tmp
+    find $OUTPUT_DIR -type f -empty -delete   
 }
 
 collect_amr_seqs(){
     local INPUT_DIR=$1
     local ALL_SEQS=$2
     local OUTPUT_DIR=$3
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
     find $INPUT_DIR -type f > parallel_input.tmp
     parallel -j $THREADS \
         "seqkit grep -n -f {} $ALL_SEQS > $OUTPUT_DIR/{/.}.fasta" \
@@ -102,29 +116,24 @@ collect_amr_seqs(){
 
 sort_amr_seqs(){
     local INPUT_DIR=$1
-    local INPUT_DIR2=$2
+    local OUTPUT_DIR=$2
+    local INPUT_DIR2=$3
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
     find $INPUT_DIR -type f > parallel_input.tmp
     parallel -j $THREADS \
-        "python scripts/sort_amr_seqs.py -i {} -o $INPUT_DIR2/{/.}.out" \
+        "python scripts/sort_amr_seqs.py -i {} \
+        -o $OUTPUT_DIR/{/.}.fasta\
+        -r $INPUT_DIR2/{/.}.out" \
         :::: parallel_input.tmp
     rm parallel_input.tmp 
-    }
-
-translate_multifastas() {
-    local INPUT_DIR=$1
-    local OUTPUT_DIR=$2
-    find $INPUT_DIR -name "*.fasta" > parallel_input.tmp
-    parallel -j $THREADS \
-        "transeq \
-            -sequence {} \
-            -outseq $OUTPUT_DIR/{/.}.fasta" \
-        :::: parallel_input.tmp
-    rm parallel_input.tmp
     }
 
 msa() {
     local INPUT_DIR=$1
     local OUTPUT_DIR=$2
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
     find $INPUT_DIR -name "*.fasta" > parallel_input.tmp
     parallel -j $THREADS \
         "mafft \
@@ -140,6 +149,8 @@ pal2nal() {
     local INPUT_DIR=$1
     local INPUT_DIR2=$2
     local OUTPUT_DIR=$3
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
     find $INPUT_DIR -name "*.msa" > parallel_input.tmp
     parallel -j $THREADS \
         "pal2nal.pl -output fasta {} $INPUT_DIR2/{/.}.fasta > $OUTPUT_DIR/{/.}.fasta" \
@@ -147,18 +158,49 @@ pal2nal() {
     rm parallel_input.tmp
     }
 
+remove_duplicates() {
+    local INPUT_DIR=$1
+    local OUTPUT_DIR=$2
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
+    find $INPUT_DIR -type f > parallel_input.tmp
+    parallel -j $THREADS \
+        "seqkit rmdup -s {} > $OUTPUT_DIR/{/.}.fasta" \
+        :::: parallel_input.tmp
+    rm parallel_input.tmp
+}
+
+rapidnj() {
+    local INPUT_DIR=$1
+    local OUTPUT_DIR=$2
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
+    find $INPUT_DIR -type f > parallel_input.tmp
+    parallel -j $THREADS \
+        "echo {} && rapidnj {} \
+        -i fa \
+        -c 1 \
+        -x $OUTPUT_DIR/{/.}.tree" \
+        :::: parallel_input.tmp
+    rm parallel_input.tmp
+}
+
 ### FUNCTION CALLS ###
 
-build_directory_structure
+# build_directory_structure
 # fetch_genome_data $INPUT_DIR "$TAXON"
 # extract_orfs $INPUT_DIR/data $OUTPUT_DIR/orfs
 # build_blast_database $OUTPUT_DIR/orfs $OUTPUT_DIR/blastdb
 # split_amr_db resources/amr_db.fasta data/references
-translate_multifastas $OUTPUT_DIR/references/dna $OUTPUT_DIR/references/protein
-amr_blast $OUTPUT_DIR/references/protein $OUTPUT_DIR/blastdb/full_db $OUTPUT_DIR/amr_blast
-filter_blast $OUTPUT_DIR/amr_blast $OUTPUT_DIR/filtered_ids
-collect_amr_seqs $OUTPUT_DIR/filtered_ids data/blastdb/combined.fasta $OUTPUT_DIR/multi
-sort_amr_seqs $OUTPUT_DIR/multi $OUTPUT_DIR/filtered_ids
-translate_multifastas $OUTPUT_DIR/multi $OUTPUT_DIR/transeq
-msa $OUTPUT_DIR/transeq $OUTPUT_DIR/msa
-pal2nal $OUTPUT_DIR/msa $OUTPUT_DIR/multi $OUTPUT_DIR/pal2nal
+# translate_fasta $OUTPUT_DIR/references/dna $OUTPUT_DIR/references/protein
+# amr_blast $OUTPUT_DIR/references/protein $OUTPUT_DIR/blastdb/full_db $OUTPUT_DIR/amr_blast
+# filter_blast $OUTPUT_DIR/amr_blast $OUTPUT_DIR/filtered_ids
+# collect_amr_seqs $OUTPUT_DIR/filtered_ids data/blastdb/combined.fasta $OUTPUT_DIR/multi
+# sort_amr_seqs $OUTPUT_DIR/multi $OUTPUT_DIR/sorted_multi $OUTPUT_DIR/filtered_ids
+# translate_fasta $OUTPUT_DIR/sorted_multi $OUTPUT_DIR/transeq
+# msa $OUTPUT_DIR/transeq $OUTPUT_DIR/msa
+# pal2nal $OUTPUT_DIR/msa $OUTPUT_DIR/sorted_multi $OUTPUT_DIR/pal2nal
+
+
+remove_duplicates $OUTPUT_DIR/pal2nal $OUTPUT_DIR/rmdup
+# rapidnj $OUTPUT_DIR/pal2nal $OUTPUT_DIR/rapidnj

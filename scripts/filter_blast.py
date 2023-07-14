@@ -11,7 +11,6 @@ args = parse_args()
 df = pd.read_csv(args.infile, sep="\t", names=["sseqid", "qlen", "length", "pident"])
 df["len_ident"] = df["length"] / df["qlen"] * df["pident"]
 df.sort_values("len_ident", inplace=True, ascending=False, ignore_index=True)
-df.to_csv(args.infile, sep='\t', index=False)
 df = df[df['len_ident'] >= 70]
 seq_ids = df['sseqid'].to_list()
 with open(args.outfile, 'w') as outfile:
