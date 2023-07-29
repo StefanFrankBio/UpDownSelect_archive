@@ -47,6 +47,7 @@ def main():
         stop_positions_by_frame = split_by_modulo(stop_positions)
         stops = match_stop_positions(stop_positions_by_frame)
         ss_orfs.extend([seq[x+3:y] for x,y in stops if y-x > 100])
+    ss_orfs = [seq for seq in ss_orfs if all(char in 'ACGT' for char in seq)]
     seq_records = [SeqRecord(Seq(seq), id=f"{args.identifier}_{i}", description="") for i, seq in enumerate(ss_orfs)]
     SeqIO.write(seq_records, args.outfile, "fasta")
 

@@ -6,7 +6,7 @@ channels:
   - defaults
 
 dependencies:
-  - ncbi-datasets-cli=14.25.1
+  - ncbi-datasets-cli=15.10.0
   - unzip=6.0
   - bakta=1.7.0
   - parallel

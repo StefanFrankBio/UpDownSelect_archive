@@ -23,6 +23,13 @@ fetch_genome_data() {
     datasets rehydrate --directory .
     }
 
+format_metadata() {
+    local INPUT_FILE=$1
+    local OUTPUT_FILE=$2
+    dataformat tsv genome --inputfile $INPUT_FILE --fields accession,assminfo-biosample-attribute-name,assminfo-biosample-attribute-value > $OUTPUT_FILE
+    python scripts/metadata.py -i $OUTPUT_FILE -o $OUTPUT_FILE
+}
+
 extract_orfs() {
     local INPUT_DIR=$1
     local OUTPUT_DIR=$2
@@ -168,6 +175,19 @@ remove_duplicates() {
         "seqkit rmdup -s {} > $OUTPUT_DIR/{/.}.fasta" \
         :::: parallel_input.tmp
     rm parallel_input.tmp
+    }
+
+check_min_seq_counts() {
+    local INPUT_DIR="$1"
+    local OUTPUT_DIR="$2"
+    local CUTOFF="$3"
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
+    for file in "$INPUT_DIR"/*; do
+        if [ $(grep -o '>' "$file" | wc -l) -ge "$CUTOFF" ]; then
+            cp "$file" "$OUTPUT_DIR"
+        fi
+    done
 }
 
 rapidnj() {
@@ -180,15 +200,113 @@ rapidnj() {
         "echo {} && rapidnj {} \
         -i fa \
         -c 1 \
-        -x $OUTPUT_DIR/{/.}.tree" \
+        -x $OUTPUT_DIR/{/.}.tree \
+        && sed -i 's/'\''//g' $OUTPUT_DIR/{/.}.tree" \
+        :::: parallel_input.tmp
+    rm parallel_input.tmp
+    }
+
+meme() {
+    local INPUT_DIR1=$1
+    local INPUT_DIR2=$2
+    local OUTPUT_DIR=$3
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
+    find $INPUT_DIR1 -type f > parallel_input.tmp
+    parallel -j $THREADS \
+        "hyphy CPU=1 meme \
+            --alignment {} \
+            --tree $INPUT_DIR2/{/.}.tree \
+            --output $OUTPUT_DIR/{/.}.meme" \
+            :::: parallel_input.tmp
+    rm parallel_input.tmp
+}
+
+fel() {
+    local INPUT_DIR1=$1
+    local INPUT_DIR2=$2
+    local OUTPUT_DIR=$3
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
+    find $INPUT_DIR1 -type f > parallel_input.tmp
+    parallel -j $THREADS \
+        "hyphy CPU=1 fel \
+            --alignment {} \
+            --tree $INPUT_DIR2/{/.}.tree \
+            --output $OUTPUT_DIR/{/.}.fel" \
+            :::: parallel_input.tmp
+    rm parallel_input.tmp
+}
+
+slac() {
+    local INPUT_DIR1=$1
+    local INPUT_DIR2=$2
+    local OUTPUT_DIR=$3
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
+    find $INPUT_DIR1 -type f > parallel_input.tmp
+    parallel -j $THREADS \
+        "hyphy CPU=1 slac \
+            --alignment {} \
+            --tree $INPUT_DIR2/{/.}.tree \
+            --output $OUTPUT_DIR/{/.}.slac" \
+            :::: parallel_input.tmp
+    rm parallel_input.tmp
+}
+
+codeml() {
+    local INPUT_DIR=$1
+    local OUTPUT_DIR=$2
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
+    find $INPUT_DIR -type f > parallel_input.tmp
+    parallel -j $THREADS \
+        "mkdir $OUTPUT_DIR/{/.} \
+        && sed 's|stewart\.aa|/home/stefan/UpDownSelect/{}|g; \
+        s|mlc|{/.}.cml|g; \
+        s|stewart\.trees|/home/stefan/UpDownSelect/data/rapidnj/{/.}.tree|g' \
+        resources/codeml_default.ctl > $OUTPUT_DIR/{/.}/{/.}.ctl \
+        && cd $OUTPUT_DIR/{/.} \
+        && codeml {/.}.ctl" \
+        :::: parallel_input.tmp
+    rm parallel_input.tmp
+}
+
+dNdS_per_site() {
+    local INPUT_DIR=$1
+    local OUTPUT_DIR=$2
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
+    find $INPUT_DIR -type f > parallel_input.tmp
+    parallel -j $THREADS \
+        "python scripts/dNdS.py per_site -i {} -o $OUTPUT_DIR/{/.}.tsv" \
+        :::: parallel_input.tmp
+    rm parallel_input.tmp
+}
+
+hyphy_per_site() {
+    local INPUT_DIR=$1
+    local OUTPUT_DIR=$2
+    rm -r $OUTPUT_DIR 2> /dev/null
+    mkdir -p $OUTPUT_DIR
+    find $INPUT_DIR -type f > parallel_input.tmp
+    parallel -j $THREADS \
+        "python scripts/hyphy_per_site.py \
+        -m {} \
+        -f data/fel/{/.}.fel \
+        -s data/slac/{/.}.slac \
+        -c data/codeml/{/.}/rst \
+        -d data/dNdS_per_site/{/.}.tsv \
+        -n data/dNdS_per_site_with_dups/{/.}.tsv \
+        -o $OUTPUT_DIR/{/.}.tsv" \
         :::: parallel_input.tmp
     rm parallel_input.tmp
 }
 
 ### FUNCTION CALLS ###
 
-# build_directory_structure
 # fetch_genome_data $INPUT_DIR "$TAXON"
+format_metadata $INPUT_DIR/data/assembly_data_report.jsonl $INPUT_DIR/data/ncbi_metadata.tsv
 # extract_orfs $INPUT_DIR/data $OUTPUT_DIR/orfs
 # build_blast_database $OUTPUT_DIR/orfs $OUTPUT_DIR/blastdb
 # split_amr_db resources/amr_db.fasta data/references
@@ -200,7 +318,14 @@ rapidnj() {
 # translate_fasta $OUTPUT_DIR/sorted_multi $OUTPUT_DIR/transeq
 # msa $OUTPUT_DIR/transeq $OUTPUT_DIR/msa
 # pal2nal $OUTPUT_DIR/msa $OUTPUT_DIR/sorted_multi $OUTPUT_DIR/pal2nal
-
-
-remove_duplicates $OUTPUT_DIR/pal2nal $OUTPUT_DIR/rmdup
-# rapidnj $OUTPUT_DIR/pal2nal $OUTPUT_DIR/rapidnj
+# remove_duplicates $OUTPUT_DIR/pal2nal $OUTPUT_DIR/rmdup
+# check_min_seq_counts $OUTPUT_DIR/rmdup $OUTPUT_DIR/min_seq_counts 3
+# rapidnj $OUTPUT_DIR/min_seq_counts $OUTPUT_DIR/rapidnj
+# meme $OUTPUT_DIR/min_seq_counts $OUTPUT_DIR/rapidnj $OUTPUT_DIR/meme
+# fel $OUTPUT_DIR/min_seq_counts $OUTPUT_DIR/rapidnj $OUTPUT_DIR/fel
+# slac $OUTPUT_DIR/min_seq_counts $OUTPUT_DIR/rapidnj $OUTPUT_DIR/slac
+# codeml $OUTPUT_DIR/min_seq_counts /home/stefan/UpDownSelect/$OUTPUT_DIR/codeml
+# dNdS_per_site $OUTPUT_DIR/min_seq_counts $OUTPUT_DIR/dNdS_per_site
+# check_min_seq_counts $OUTPUT_DIR/pal2nal $OUTPUT_DIR/min_seq_counts_with_dups 3
+# dNdS_per_site $OUTPUT_DIR/min_seq_counts_with_dups $OUTPUT_DIR/dNdS_per_site_with_dups
+# hyphy_per_site $OUTPUT_DIR/meme $OUTPUT_DIR/hyphy_per_site
